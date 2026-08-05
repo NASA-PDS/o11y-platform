@@ -2,10 +2,10 @@
 # ==========================================
 #
 # Modules:
-#   opensearch_managed/  - Shared OpenSearch domain (~15-20 min to create)
+#   opensearch/  - Shared OpenSearch domain (~15-20 min to create)
 #
 # Consumers connect via SSM:
-#   /pds/observability/opensearch_managed/opensearch_endpoint
+#   /pds/observability/opensearch/opensearch_endpoint
 #
 # Prerequisites:
 #   brew install go-task/tap/go-task
@@ -48,7 +48,7 @@ tasks:
     opensearch:init:
         desc: "Initialize OpenSearch domain Terraform"
         deps: [aws]
-        dir: opensearch_managed
+        dir: opensearch
         requires:
             vars:
                 - name: VENUE
@@ -58,14 +58,14 @@ tasks:
 
     opensearch:validate:
         desc: "Validate OpenSearch domain Terraform files"
-        dir: opensearch_managed
+        dir: opensearch
         cmds:
             - terraform validate -no-color
 
     opensearch:plan:
         desc: "Plan OpenSearch domain changes"
         deps: ["opensearch:init"]
-        dir: opensearch_managed
+        dir: opensearch
         requires:
             vars:
                 - name: VENUE
@@ -77,7 +77,7 @@ tasks:
         desc: "Deploy the OpenSearch domain (slow - allow ~15-20 min for domain creation)"
         aliases: ["opensearch:apply"]
         deps: ["opensearch:validate"]
-        dir: opensearch_managed
+        dir: opensearch
         requires:
             vars:
                 - name: VENUE
@@ -87,7 +87,7 @@ tasks:
 
     opensearch:destroy:
         desc: "Destroy the OpenSearch domain (destroys all indexed data)"
-        dir: opensearch_managed
+        dir: opensearch
         requires:
             vars:
                 - name: VENUE
@@ -98,7 +98,7 @@ tasks:
     opensearch:refresh:
         desc: "Refresh OpenSearch module Terraform state"
         deps: ["opensearch:init"]
-        dir: opensearch_managed
+        dir: opensearch
         requires:
             vars:
                 - name: VENUE
@@ -109,7 +109,7 @@ tasks:
     opensearch:sync:
         desc: "Apply refresh-only to sync OpenSearch state without changing infrastructure"
         deps: ["opensearch:init"]
-        dir: opensearch_managed
+        dir: opensearch
         requires:
             vars:
                 - name: VENUE
@@ -120,7 +120,7 @@ tasks:
     opensearch:show:
         desc: "Show OpenSearch domain Terraform state"
         deps: ["opensearch:init"]
-        dir: opensearch_managed
+        dir: opensearch
         requires:
             vars:
                 - name: VENUE
@@ -138,7 +138,7 @@ tasks:
         cmds:
             - |
               aws ssm get-parameter \
-                --name /pds/observability/opensearch_managed/opensearch_endpoint \
+                --name /pds/observability/opensearch/opensearch_endpoint \
                 --query Parameter.Value \
                 --output text
 

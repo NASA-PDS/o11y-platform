@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `pdc-observability` is the shared observability platform for NASA Planetary Data System (PDS). It hosts infrastructure that multiple PDS sub-components consume. **All real work in this repo currently lives under `terraform/`.**
 
 **Current components:**
-- **Managed OpenSearch domain** (`terraform/opensearch_managed/`) — VPC-only OpenSearch cluster. Both the web-analytics Logstash pipeline and the CloudFront realtime-monitor Firehose stream write to this domain. Consumers discover the endpoint via SSM.
+- **Managed OpenSearch domain** (`terraform/opensearch/`) — VPC-only OpenSearch cluster. Both the web-analytics Logstash pipeline and the CloudFront realtime-monitor Firehose stream write to this domain. Consumers discover the endpoint via SSM.
 
 **Sub-component repos that consume this platform:**
 - [web-analytics](https://github.com/NASA-PDS/web-analytics) — Logstash EC2 ingesting node access logs
@@ -31,7 +31,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```
 terraform/
-  ├── opensearch_managed/         # OpenSearch domain (shared platform)
+  ├── opensearch/                 # OpenSearch domain (shared platform)
   │   ├── main.tf                 # Domain, SGs, access policy
   │   ├── outputs.tf              # Publishes endpoint to SSM
   │   ├── variables.tf
@@ -52,7 +52,7 @@ terraform/
 
 ```bash
 cd terraform/
-cp opensearch_managed/tfvars/dev.tfvars.example opensearch_managed/tfvars/dev.tfvars
+cp opensearch/tfvars/dev.tfvars.example opensearch/tfvars/dev.tfvars
 # Edit dev.tfvars: set domain_name, vpc_id, vpc_subnet_ids, ec2_security_group_name, firehose_security_group_id
 ```
 
@@ -78,17 +78,17 @@ CI (`.github/workflows/terraform_cicd.yaml`) currently only runs `terraform fmt`
 
 ### Key design decisions
 
-- **SSM decoupling** — the OpenSearch endpoint is published to `/pds/observability/opensearch_managed/opensearch_endpoint` after deploy. Consumers read this at plan time; no shared Terraform state or cross-repo module references.
+- **SSM decoupling** — the OpenSearch endpoint is published to `/pds/observability/opensearch/opensearch_endpoint` after deploy. Consumers read this at plan time; no shared Terraform state or cross-repo module references.
 - **Access policy via SSM** — EC2 and Firehose role ARNs are read from SSM at plan time (`/pds/web-analytics/iam/ec2_role_arn`, `/pds/monitor/firehose/firehose-role-arn`). No role names in tfvars. If a consumer hasn't deployed yet and its SSM parameter doesn't exist, seed it manually with `aws ssm put-parameter` before planning (see `terraform/README.md`).
 - **VPC-only** — no public endpoint. OpenSearch is accessible only from within the VPC via security group rules (`aws_security_group.opensearch`, created only when `vpc_enabled = true`).
 - **`lifecycle { ignore_changes = [tags] }`** on the OpenSearch SG — suppresses drift from AWS Config auto-tagging.
-- **State** — S3 backend, key `web-analytics/opensearch.tfstate` (kept for state continuity from before this repo split out), bucket/region per-venue in `backend-<venue>.hcl`.
+- **State** — S3 backend, key `observability/opensearch.tfstate`, bucket/region per-venue in `backend-<venue>.hcl`.
 - **dev vs prod sizing** — dev uses single-node, no dedicated masters, no zone awareness (`t3.medium.search`); prod-like venues should enable `dedicated_master_enabled` and `zone_awareness_enabled` with matching subnet/AZ counts.
 
 ### Adding a new consumer
 
 1. Obtain the consumer's IAM role ARN.
 2. Publish it to an agreed SSM path (e.g. `/pds/<consumer>/iam/<role>_arn`).
-3. Add a `data "aws_ssm_parameter"` block in `opensearch_managed/main.tf`.
+3. Add a `data "aws_ssm_parameter"` block in `opensearch/main.tf`.
 4. Add the ARN to the `AllowEC2AndFirehose` principal list in the access policy.
 5. Add a SG ingress rule if the consumer needs VPC-level access.

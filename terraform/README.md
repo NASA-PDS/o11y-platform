@@ -17,7 +17,7 @@ flowchart LR
     end
 
     POL["IAM Access Policy\n(resource-based)"]
-    SSM_OUT["SSM\n/pds/observability/opensearch_managed\n/opensearch_endpoint"]
+    SSM_OUT["SSM\n/pds/observability/opensearch\n/opensearch_endpoint"]
 
     subgraph wa["web-analytics"]
         LS["Logstash EC2"]
@@ -49,7 +49,7 @@ Network access is controlled by Security Group ingress rules (EC2 SG and Firehos
 ```mermaid
 flowchart TD
     subgraph here["pdc-observability"]
-        OS["opensearch_managed\n(~15-20 min)"]
+        OS["opensearch\n(~15-20 min)"]
     end
 
     subgraph wa["web-analytics"]
@@ -90,7 +90,7 @@ All tfvars are gitignored. Copy the example and fill in values:
 ```bash
 cd terraform/
 
-cp opensearch_managed/tfvars/dev.tfvars.example opensearch_managed/tfvars/dev.tfvars
+cp opensearch/tfvars/dev.tfvars.example opensearch/tfvars/dev.tfvars
 # Edit dev.tfvars: set domain_name, vpc_id, vpc_subnet_ids, ec2_security_group_name, firehose_security_group_id
 ```
 
@@ -119,7 +119,7 @@ task opensearch:endpoint VENUE=dev   # confirm endpoint stored in SSM
 
 After deploy, the endpoint is published to SSM automatically:
 ```
-/pds/observability/opensearch_managed/opensearch_endpoint
+/pds/observability/opensearch/opensearch_endpoint
 ```
 
 ---
@@ -161,6 +161,6 @@ task opensearch:destroy VENUE=dev   # destroys all indexed data — irreversible
 
 ## Architecture notes
 
-- **State** — S3 backend, key `web-analytics/opensearch.tfstate` (kept for continuity from pre-split history).
+- **State** — S3 backend, key `observability/opensearch.tfstate`.
 - **VPC/SG values** are in tfvars. TODO: source EC2 SG from SSM under `/pds/cds-infra/vpc/security_groups/` once MCP publishes it.
-- **Adding a new consumer** — publish its role ARN to SSM, add a `data "aws_ssm_parameter"` block in `opensearch_managed/main.tf`, add the ARN to the access policy principals, and add an SG ingress rule if needed.
+- **Adding a new consumer** — publish its role ARN to SSM, add a `data "aws_ssm_parameter"` block in `opensearch/main.tf`, add the ARN to the access policy principals, and add an SG ingress rule if needed.

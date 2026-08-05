@@ -31,7 +31,7 @@ OpenSearch is a shared platform — both web-analytics and cloudfront-realtime-m
 
 | Component | Path | Description |
 |---|---|---|
-| OpenSearch domain | `terraform/opensearch_managed/` | Shared VPC-only OpenSearch cluster |
+| OpenSearch domain | `terraform/opensearch/` | Shared VPC-only OpenSearch cluster |
 
 ## Consumers
 
