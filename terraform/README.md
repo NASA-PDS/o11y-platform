@@ -1,20 +1,73 @@
 # PDS Observability — Terraform
 
-Deploys the shared observability infrastructure for the NASA Planetary Data System:
+Deploys the shared observability infrastructure for the NASA Planetary Data System. Consumers connect via SSM — no cross-repo Terraform dependencies.
 
-- **Managed OpenSearch domain** — VPC-only, IAM resource-based access control, ECS v8 index schema
+## Technical architecture
 
-Consumers connect via SSM — no direct Terraform dependencies required:
+```mermaid
+flowchart LR
+    subgraph vpc["VPC (private subnets)"]
+        SG["Security Group\n(HTTPS 443 inbound)"]
+        OS["OpenSearch Domain\n(VPC endpoint)"]
+    end
 
-| Consumer | SSM key read |
-|---|---|
-| [web-analytics](https://github.com/NASA-PDS/web-analytics) — Logstash EC2 | `/pds/observability/opensearch_managed/opensearch_endpoint` |
-| [cloudfront-realtime-monitor](https://github.com/NASA-PDS/cloudfront-realtime-monitor) — Kinesis Firehose | `/pds/observability/opensearch_managed/opensearch_endpoint` |
+    subgraph ssm_in["SSM inputs (existing)"]
+        EC2ARN["/pds/web-analytics/iam/ec2_role_arn"]
+        FHARN["/pds/monitor/firehose/firehose-role-arn"]
+    end
 
+    POL["IAM Access Policy\n(resource-based)"]
+    SSM_OUT["SSM\n/pds/observability/opensearch_managed\n/opensearch_endpoint"]
+
+    subgraph wa["web-analytics"]
+        LS["Logstash EC2"]
+        EC2SG["EC2 Security Group"]
+    end
+
+    subgraph cf["cloudfront-realtime-monitor"]
+        FH["Kinesis Firehose"]
+        FHSG["Firehose Security Group"]
+    end
+
+    EC2SG -->|"SG ingress rule"| SG
+    FHSG -->|"SG ingress rule"| SG
+    SG --> OS
+    EC2ARN -->|"IAM principal"| POL
+    FHARN -->|"IAM principal"| POL
+    POL --> OS
+    OS --> SSM_OUT
+    SSM_OUT -.->|"reads at plan time"| LS
+    SSM_OUT -.->|"reads at plan time"| FH
+    LS -->|"HTTPS"| SG
+    FH -->|"HTTPS"| SG
 ```
-terraform/
-  └── opensearch_managed/   # Shared OpenSearch domain — 🔑 Power-User
+
+Network access is controlled by Security Group ingress rules (EC2 SG and Firehose SG → port 443). API access is controlled by an IAM resource-based policy whose principals are role ARNs read from SSM at plan time. The endpoint is published to SSM after deploy; consumers read it at Terraform plan time (dashed lines) with no shared state between repos.
+
+## Deployment flow
+
+```mermaid
+flowchart TD
+    subgraph here["pdc-observability"]
+        OS["opensearch_managed\n(~15-20 min)"]
+    end
+
+    subgraph wa["web-analytics"]
+        IAM["iam/policies"]
+        S3["S3 bucket"]
+        LS["logstash EC2"]
+    end
+
+    OS -->|"endpoint → SSM"| LS
+    IAM --> LS
+    S3 -->|"bucket → SSM"| LS
 ```
+
+1. **(1a) Deploy OpenSearch** — `task opensearch:deploy VENUE=dev` (~15-20 min)
+2. **(1b) While OpenSearch provisions**, run in parallel in `web-analytics`:
+   - `task iam:deploy VENUE=dev` — attaches S3 + OpenSearch policy to the EC2 role
+   - `task s3:deploy VENUE=dev` — creates the log bucket, publishes name to SSM
+3. **(2) After all above complete** — `task logstash:deploy VENUE=dev` (in `web-analytics`) — reads OpenSearch endpoint and bucket name from SSM at plan time
 
 ---
 
@@ -38,16 +91,16 @@ All tfvars are gitignored. Copy the example and fill in values:
 cd terraform/
 
 cp opensearch_managed/tfvars/dev.tfvars.example opensearch_managed/tfvars/dev.tfvars
-# Edit dev.tfvars: set vpc_id, vpc_subnet_ids, ec2_security_group_name, firehose_security_group_id
+# Edit dev.tfvars: set domain_name, vpc_id, vpc_subnet_ids, ec2_security_group_name, firehose_security_group_id
 ```
 
-Key values to fill in:
+| Variable | Notes |
+|---|---|
+| `vpc_id`, `vpc_subnet_ids` | VPC where the OpenSearch endpoint is placed (private subnets) |
+| `ec2_security_group_name` | MCP EC2 SG name — allows Logstash HTTPS inbound |
+| `firehose_security_group_id` | CloudFront Firehose SG ID — allows Firehose HTTPS inbound |
 
-| File | Variable | Notes |
-|---|---|---|
-| `opensearch_managed/tfvars/dev.tfvars` | `vpc_id`, `vpc_subnet_ids` | VPC where OpenSearch endpoint is placed |
-| `opensearch_managed/tfvars/dev.tfvars` | `ec2_security_group_name` | MCP EC2 SG — allows Logstash HTTPS inbound |
-| `opensearch_managed/tfvars/dev.tfvars` | `firehose_security_group_id` | CloudFront Firehose SG — allows Firehose HTTPS inbound |
+If either consumer SSM parameter (`ec2_role_arn`, `firehose-role-arn`) doesn't exist yet, seed it manually before the first plan — see [Access control](#access-control).
 
 ---
 
@@ -69,30 +122,26 @@ After deploy, the endpoint is published to SSM automatically:
 /pds/observability/opensearch_managed/opensearch_endpoint
 ```
 
-Consumers read this value at plan time — no manual coordination needed.
-
 ---
 
 ## Access control
 
-OpenSearch access is IAM resource-based (no FGAC). Two principals are granted `es:*`:
+OpenSearch uses IAM resource-based access (no FGAC). Principals are read from SSM at plan time:
 
-| Principal ARN | Source |
+| SSM path | Published by |
 |---|---|
-| EC2 role ARN | SSM `/pds/web-analytics/iam/ec2_role_arn` (published by web-analytics logstash deploy) |
-| Firehose role ARN | SSM `/pds/monitor/firehose/firehose-role-arn` (published by cloudfront-realtime-monitor) |
+| `/pds/web-analytics/iam/ec2_role_arn` | web-analytics `logstash` module on deploy |
+| `/pds/monitor/firehose/firehose-role-arn` | cloudfront-realtime-monitor on deploy |
 
-Both values are read from SSM at plan time. If either SSM parameter doesn't exist yet, seed it manually before planning:
+If a consumer hasn't deployed yet, seed the SSM parameter manually:
 
 ```bash
-# Seed EC2 role ARN (if logstash hasn't been deployed yet)
 aws ssm put-parameter \
   --name /pds/web-analytics/iam/ec2_role_arn \
   --type String \
   --value "arn:aws:iam::<account-id>:role/<ec2-role-name>" \
   --overwrite
 
-# Seed Firehose role ARN (if realtime-monitor hasn't been deployed yet)
 aws ssm put-parameter \
   --name /pds/monitor/firehose/firehose-role-arn \
   --type String \
@@ -112,8 +161,6 @@ task opensearch:destroy VENUE=dev   # destroys all indexed data — irreversible
 
 ## Architecture notes
 
-- **State file** stored in S3 (`pds-<venue>-<cicd>-infra`):
-  - `web-analytics/opensearch.tfstate` — OpenSearch domain (key kept for state continuity)
+- **State** — S3 backend, key `web-analytics/opensearch.tfstate` (kept for continuity from pre-split history).
 - **VPC/SG values** are in tfvars. TODO: source EC2 SG from SSM under `/pds/cds-infra/vpc/security_groups/` once MCP publishes it.
-- **OpenSearch access policy** — principals sourced from SSM at plan time. No role names in tfvars.
-- **Adding a new consumer** — grant its role ARN `es:*` access by adding a new SSM parameter and extending the `AllowEC2AndFirehose` principal list in `opensearch_managed/main.tf`.
+- **Adding a new consumer** — publish its role ARN to SSM, add a `data "aws_ssm_parameter"` block in `opensearch_managed/main.tf`, add the ARN to the access policy principals, and add an SG ingress rule if needed.
