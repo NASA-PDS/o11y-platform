@@ -2,107 +2,63 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Template repo notice:** This file was generated for `template-repo-python`. If you created a new repo from this template, update this file to reflect your project's actual package name, commands, and architecture before using it.
+## Overview
 
-## Purpose
+`pdc-observability` is the shared observability platform for NASA Planetary Data System (PDS). It hosts infrastructure that multiple PDS sub-components consume.
 
-This is NASA-PDS's template repository for new Python projects. When working in a repo created from this template, the placeholder `your_package_name` must be replaced with the actual module name throughout `setup.cfg`, `src/pds/`, `tests/`, and other files.
+**Current components:**
+- **Managed OpenSearch domain** (`terraform/opensearch_managed/`) — VPC-only OpenSearch cluster. Both the web-analytics Logstash pipeline and the CloudFront realtime-monitor Firehose stream write to this domain. Consumers discover the endpoint via SSM.
 
-## Commands
+**Sub-component repos that consume this platform:**
+- [web-analytics](https://github.com/NASA-PDS/web-analytics) — Logstash EC2 ingesting node access logs
+- [cloudfront-realtime-monitor](https://github.com/NASA-PDS/cloudfront-realtime-monitor) — Kinesis Firehose ingesting CloudFront real-time logs
 
-### Setup
+## Terraform
 
-```bash
-python -m venv venv
-source venv/bin/activate
-pip install --editable '.[dev]'
+### Structure
+
+```
+terraform/
+  ├── opensearch_managed/         # OpenSearch domain (shared platform)
+  │   ├── main.tf                 # Domain, SGs, access policy
+  │   ├── outputs.tf              # Publishes endpoint to SSM
+  │   ├── variables.tf
+  │   ├── versions.tf
+  │   ├── provider.tf
+  │   ├── backend.tf              # S3 backend key
+  │   ├── backend-dev.hcl         # Venue-specific backend config (bucket, region)
+  │   ├── backend-prod.hcl
+  │   └── tfvars/
+  │       ├── dev.tfvars.example  # Template — copy to dev.tfvars (gitignored)
+  │       └── dev.tfvars          # gitignored — VPC IDs, SG names/IDs
+  ├── Taskfile.yaml               # Task runner for opensearch:* commands
+  └── .taskrc.yaml                # interactive: true (enables VENUE enum prompting)
 ```
 
-Or via tox:
+### Deployment commands
 
 ```bash
-tox --devenv venv -e dev
+cd terraform/
+
+task opensearch:init    VENUE=dev
+task opensearch:plan    VENUE=dev
+task opensearch:deploy  VENUE=dev
+task opensearch:endpoint VENUE=dev   # confirm SSM output
 ```
 
-### Testing
+All other deployment commands (`task --list` to see the full list).
 
-```bash
-pytest                        # run all tests
-pytest tests/path/test_foo.py # run a single test file
-pytest -k "test_name"         # run a single test by name
-ptw                           # watch mode
-```
+### Key design decisions
 
-Tests run in parallel by default (`--numprocesses auto`) with coverage reporting to XML and terminal.
+- **SSM decoupling** — the OpenSearch endpoint is published to `/pds/observability/opensearch_managed/opensearch_endpoint` after deploy. Consumers read this at plan time; no shared Terraform state or cross-repo module references.
+- **Access policy via SSM** — EC2 and Firehose role ARNs are read from SSM at plan time (`/pds/web-analytics/iam/ec2_role_arn`, `/pds/monitor/firehose/firehose-role-arn`). No role names in tfvars.
+- **VPC-only** — no public endpoint. OpenSearch is accessible only from within the VPC via security group rules.
+- **`lifecycle { ignore_changes = [tags] }`** on the OpenSearch SG — suppresses drift from AWS Config auto-tagging.
 
-### Linting
+### Adding a new consumer
 
-```bash
-tox -e lint                   # run all linters (flake8, mypy, pre-commit hooks)
-flake8 src                    # flake8 only
-mypy src                      # type-checking only
-```
-
-### Full build (tests + lint + docs)
-
-```bash
-tox
-```
-
-### Documentation
-
-```bash
-sphinx-build docs/source docs/build
-# output at docs/build/index.html
-```
-
-### Build package
-
-```bash
-pip install build
-python -m build .
-```
-
-### Secrets detection
-
-```bash
-scripts/detect_secrets_baseline.sh scan   # regenerate .secrets.baseline
-scripts/detect_secrets_baseline.sh audit  # interactively review/classify detected secrets
-scripts/detect_secrets_baseline.sh        # check for new secrets vs baseline (run by pre-commit)
-```
-
-Per-repo file exclusions go in `.detect-secrets-ignore` (one regex per line). Global exclusions (`.git`, `venv`, `dist`, etc.) are baked into the script.
-
-## Architecture
-
-### Package layout
-
-Source lives under `src/pds/<package_name>/` using a [PEP 420 namespace package](https://peps.python.org/pep-0420/) — `src/pds/__init__.py` is intentionally minimal (no `__path__` manipulation) to support the `pds.*` namespace shared across multiple PDS Python packages.
-
-Version is read at import time from `src/pds/<package_name>/VERSION.txt` via `importlib.resources`, not hardcoded.
-
-Entry points (CLI scripts) are declared in `setup.cfg` under `[options.entry_points] console_scripts`.
-
-### Tests
-
-Tests go in `tests/pds/<package_name>/` mirroring the source tree. The `[tool:pytest]` section in `setup.cfg` configures coverage to report on the `pds` namespace.
-
-### CI/CD
-
-Two standard GitHub Actions workflows drive releases via [NASA-PDS/roundup-action](https://github.com/NASA-PDS/roundup-action):
-
-- **`unstable-cicd.yaml`** — triggers on push to `main`; publishes a SNAPSHOT release to Test PyPI
-- **`stable-cicd.yaml`** — triggers on push to `release/<version>` branches; publishes stable releases to PyPI
-
-Required repository secrets: `ADMIN_GITHUB_TOKEN`, `TEST_PYPI_USERNAME`, `TEST_PYPI_PASSWORD`, `SONAR_TOKEN`.
-
-### Code style
-
-- **flake8** enforces PEP8 + docstrings (Google convention) + bugbear; max line length 120
-- **mypy** enforces type annotations across `src/`
-- **black** is configured (`pyproject.toml`) but disabled in pre-commit due to conflict with `reorder-python-imports`
-- Pre-commit hooks run mypy + flake8 on commit; pytest runs on push
-
-### Logging
-
-Use `logging.getLogger(__name__)` — never `print()` for runtime output.
+1. Obtain the consumer's IAM role ARN.
+2. Publish it to an agreed SSM path (e.g. `/pds/<consumer>/iam/<role>_arn`).
+3. Add a `data "aws_ssm_parameter"` block in `opensearch_managed/main.tf`.
+4. Add the ARN to the `AllowEC2AndFirehose` principal list in the access policy.
+5. Add a SG ingress rule if the consumer needs VPC-level access.

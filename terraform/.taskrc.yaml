@@ -1,0 +1,3 @@
+# Taskfile.dev configuration
+# See: https://taskfile.dev/docs/reference/config
+interactive: true
