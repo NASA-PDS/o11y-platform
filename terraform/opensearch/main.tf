@@ -52,11 +52,7 @@ resource "aws_security_group" "opensearch" {
   }
 
   tags = {
-    Name      = "${var.domain_name}-opensearch-sg"
-    venue     = var.venue
-    tenant    = var.tenant
-    component = var.component
-    managedby = var.managedby
+    Name = "${var.domain_name}-opensearch-sg"
   }
 
   lifecycle {
@@ -96,7 +92,7 @@ resource "aws_opensearch_domain" "pds_opensearch_domain" {
   }
 
   node_to_node_encryption {
-    enabled = var.n2n_encryption
+    enabled = var.node_to_node_encryption
   }
 
   domain_endpoint_options {
@@ -138,8 +134,8 @@ resource "aws_opensearch_domain_policy" "domain_access_policy" {
         }
         Action = "es:*"
         Resource = [
-          "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.domain_name}",
-          "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.domain_name}/*",
+          "arn:${var.partition}:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.domain_name}",
+          "arn:${var.partition}:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.domain_name}/*",
         ]
       }
     ]

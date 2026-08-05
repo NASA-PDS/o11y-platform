@@ -13,6 +13,6 @@
 
 terraform {
   backend "s3" {
-    key = "web-analytics/opensearch.tfstate"
+    key = "observability/opensearch.tfstate"
   }
 }

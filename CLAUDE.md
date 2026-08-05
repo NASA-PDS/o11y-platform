@@ -33,7 +33,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 terraform/
   ├── opensearch/                 # OpenSearch domain (shared platform)
   │   ├── main.tf                 # Domain, SGs, access policy
-  │   ├── outputs.tf              # Publishes endpoint to SSM
+  │   ├── outputs.tf              # Publishes endpoint + ARN to SSM
   │   ├── variables.tf
   │   ├── versions.tf              # required_version, aws provider ~> 6.0
   │   ├── provider.tf              # default_tags: tenant/venue/component/managedby/cicd
@@ -78,7 +78,7 @@ CI (`.github/workflows/terraform_cicd.yaml`) currently only runs `terraform fmt`
 
 ### Key design decisions
 
-- **SSM decoupling** — the OpenSearch endpoint is published to `/pds/observability/opensearch/opensearch_endpoint` after deploy. Consumers read this at plan time; no shared Terraform state or cross-repo module references.
+- **SSM decoupling** — the OpenSearch endpoint and domain ARN are published to `/pds/observability/opensearch/opensearch_endpoint` and `/pds/observability/opensearch/opensearch_arn` after deploy. Consumers read these at plan time (the ARN is consumed by web-analytics' `iam/policies` module to scope IAM permissions); no shared Terraform state or cross-repo module references.
 - **Access policy via SSM** — EC2 and Firehose role ARNs are read from SSM at plan time (`/pds/web-analytics/iam/ec2_role_arn`, `/pds/monitor/firehose/firehose-role-arn`). No role names in tfvars. If a consumer hasn't deployed yet and its SSM parameter doesn't exist, seed it manually with `aws ssm put-parameter` before planning (see `terraform/README.md`).
 - **VPC-only** — no public endpoint. OpenSearch is accessible only from within the VPC via security group rules (`aws_security_group.opensearch`, created only when `vpc_enabled = true`).
 - **`lifecycle { ignore_changes = [tags] }`** on the OpenSearch SG — suppresses drift from AWS Config auto-tagging.

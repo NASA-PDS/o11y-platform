@@ -17,11 +17,12 @@ flowchart LR
     end
 
     POL["IAM Access Policy\n(resource-based)"]
-    SSM_OUT["SSM\n/pds/observability/opensearch\n/opensearch_endpoint"]
+    SSM_OUT["SSM outputs\n/pds/observability/opensearch\n/opensearch_endpoint\n/opensearch_arn"]
 
     subgraph wa["web-analytics"]
         LS["Logstash EC2"]
         EC2SG["EC2 Security Group"]
+        WAIAM["iam/policies"]
     end
 
     subgraph cf["cloudfront-realtime-monitor"]
@@ -36,13 +37,14 @@ flowchart LR
     FHARN -->|"IAM principal"| POL
     POL --> OS
     OS --> SSM_OUT
-    SSM_OUT -.->|"reads at plan time"| LS
-    SSM_OUT -.->|"reads at plan time"| FH
+    SSM_OUT -.->|"endpoint, reads at plan time"| LS
+    SSM_OUT -.->|"endpoint, reads at plan time"| FH
+    SSM_OUT -.->|"arn, reads at plan time"| WAIAM
     LS -->|"HTTPS"| SG
     FH -->|"HTTPS"| SG
 ```
 
-Network access is controlled by Security Group ingress rules (EC2 SG and Firehose SG → port 443). API access is controlled by an IAM resource-based policy whose principals are role ARNs read from SSM at plan time. The endpoint is published to SSM after deploy; consumers read it at Terraform plan time (dashed lines) with no shared state between repos.
+Network access is controlled by Security Group ingress rules (EC2 SG and Firehose SG → port 443). API access is controlled by an IAM resource-based policy whose principals are role ARNs read from SSM at plan time. The domain's endpoint and ARN are published to SSM after deploy; consumers read them at Terraform plan time (dashed lines) with no shared state between repos. The ARN is consumed by web-analytics' `iam/policies` module to scope the Logstash EC2 role's OpenSearch permissions.
 
 ## Deployment flow
 
@@ -117,9 +119,10 @@ task opensearch:deploy  VENUE=dev
 task opensearch:endpoint VENUE=dev   # confirm endpoint stored in SSM
 ```
 
-After deploy, the endpoint is published to SSM automatically:
+After deploy, the endpoint and domain ARN are published to SSM automatically:
 ```
 /pds/observability/opensearch/opensearch_endpoint
+/pds/observability/opensearch/opensearch_arn
 ```
 
 ---

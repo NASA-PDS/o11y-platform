@@ -4,6 +4,12 @@ variable "aws_region" {
   default     = "us-west-2"
 }
 
+variable "partition" {
+  type        = string
+  description = "AWS partition (aws, aws-us-gov, aws-cn)"
+  default     = "aws"
+}
+
 variable "domain_name" {
   type        = string
   description = "Name of the managed OpenSearch domain"
@@ -62,7 +68,7 @@ variable "ebs_volume_type" {
   default     = "gp3"
 }
 
-variable "n2n_encryption" {
+variable "node_to_node_encryption" {
   type        = bool
   description = "Enable node-to-node encryption"
   default     = true
@@ -117,7 +123,7 @@ variable "tenant" {
 variable "component" {
   type        = string
   description = "Tag value for component"
-  default     = "web-analytics"
+  default     = "observability"
 }
 
 variable "cicd" {

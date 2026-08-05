@@ -23,3 +23,8 @@ output "opensearch_domain_name" {
   value       = aws_opensearch_domain.pds_opensearch_domain.domain_name
   description = "Managed OpenSearch domain name"
 }
+
+output "opensearch_arn" {
+  value       = aws_opensearch_domain.pds_opensearch_domain.arn
+  description = "Managed OpenSearch domain ARN"
+}
