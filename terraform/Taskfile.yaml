@@ -9,9 +9,7 @@
 #
 # Prerequisites:
 #   brew install go-task/tap/go-task
-#   export AWS_ACCESS_KEY_ID=...
-#   export AWS_SECRET_ACCESS_KEY=...
-#   export AWS_DEFAULT_REGION=...
+#   Run `task auth` and follow the instructions to export SSO credentials.
 
 ---
 
