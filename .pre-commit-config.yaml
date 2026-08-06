@@ -63,3 +63,12 @@ repos:
         entry: scripts/detect_secrets_baseline.sh
         language: script
         pass_filenames: false
+
+-   repo: local
+    hooks:
+    -   id: terraform-docs
+        name: terraform-docs
+        entry: bash -c 'cd terraform && terraform-docs -c .terraform-docs.yml --recursive --recursive-path=. --recursive-include-main=false .'
+        language: system
+        files: ^terraform/.*\.tf$
+        pass_filenames: false

@@ -2,51 +2,76 @@
 
 Creates the shared OpenSearch domain for PDS observability and publishes its endpoint and ARN to SSM for downstream consumers (web-analytics, CloudFront real-time logging).
 
+<!-- BEGIN_TF_DOCS -->
+## Requirements
+
+| Name | Version |
+| ---- | ------- |
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.10.0 |
+| <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.0 |
+
+## Providers
+
+| Name | Version |
+| ---- | ------- |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.58.0 |
+
+## Modules
+
+No modules.
+
 ## Resources
 
-- `aws_opensearch_domain.pds_opensearch_domain` — managed OpenSearch domain (VPC-attached when `vpc_enabled = true`)
-- `aws_security_group.opensearch` — domain VPC security group; allows HTTPS inbound from the Logstash EC2 SG and the Firehose SG (created only when `vpc_enabled = true`)
-- `aws_opensearch_domain_policy.domain_access_policy` — resource-based access policy granting `es:*` to the Logstash EC2 role and Firehose role (ARNs read from SSM)
-- `aws_ssm_parameter.opensearch_endpoint` — publishes `https://…` endpoint to `/pds/observability/opensearch/opensearch_endpoint`
-- `aws_ssm_parameter.opensearch_arn` — publishes domain ARN to `/pds/observability/opensearch/opensearch_arn`
+| Name | Type |
+| ---- | ---- |
+| [aws_opensearch_domain.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/opensearch_domain) | resource |
+| [aws_opensearch_domain_policy.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/opensearch_domain_policy) | resource |
+| [aws_security_group.opensearch](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
+| [aws_ssm_parameter.opensearch_arn](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_parameter) | resource |
+| [aws_ssm_parameter.opensearch_endpoint](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_parameter) | resource |
+| [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
+| [aws_security_group.mcp_ec2](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/security_group) | data source |
+| [aws_ssm_parameter.cloudfront_realtime_firehose_role_arn](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
+| [aws_ssm_parameter.ec2_role_arn](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
 
 ## Inputs
 
-| Name | Type | Default | Description |
-|---|---|---|---|
-| `domain_name` | `string` | — | OpenSearch domain name |
-| `ebs_volume_gb` | `number` | — | EBS volume size per data node (GB) |
-| `venue` | `string` | — | Deployment venue (`dev`, `test`, `prod`) |
-| `managedby` | `string` | `pdsoperator@jpl.nasa.gov` | Tag: owner contact |
-| `engine_version` | `string` | `OpenSearch_2.19` | OpenSearch engine version — pin to deployed version |
-| `data_node_instance_type` | `string` | `r6g.xlarge.search` | Data node instance type |
-| `data_node_count` | `number` | `3` | Number of data nodes |
-| `dedicated_master_enabled` | `bool` | `true` | Enable dedicated master nodes |
-| `master_node_instance_type` | `string` | `m6g.large.search` | Master node instance type |
-| `master_node_count` | `number` | `3` | Number of dedicated master nodes |
-| `zone_awareness_enabled` | `bool` | `false` | Multi-AZ zone awareness |
-| `availability_zone_count` | `number` | `3` | AZs (must match data node count and subnet count) |
-| `ebs_volume_type` | `string` | `gp3` | EBS volume type |
-| `encryption_at_rest` | `bool` | `true` | Encryption at rest |
-| `node_to_node_encryption` | `bool` | `true` | Node-to-node encryption |
-| `vpc_enabled` | `bool` | `false` | Deploy inside VPC |
-| `vpc_id` | `string` | `""` | VPC ID (required when `vpc_enabled = true`) |
-| `vpc_subnet_ids` | `list(string)` | `[]` | Subnet IDs — one per AZ |
-| `ec2_security_group_name` | `string` | `""` | MCP EC2 SG name (required when `vpc_enabled = true`) |
-| `firehose_security_group_id` | `string` | — | Firehose delivery stream SG ID |
-| `aws_region` | `string` | `us-west-2` | AWS region |
-| `partition` | `string` | `aws` | AWS partition |
-| `tenant` | `string` | `en` | Tag: tenant identifier |
-| `component` | `string` | `observability` | Tag: component name |
-| `cicd` | `string` | `terraform` | Tag: CI/CD method |
+| Name | Description | Type | Default | Required |
+| ---- | ----------- | ---- | ------- | :------: |
+| <a name="input_domain_name"></a> [domain\_name](#input\_domain\_name) | Name of the managed OpenSearch domain | `string` | n/a | yes |
+| <a name="input_ebs_volume_gb"></a> [ebs\_volume\_gb](#input\_ebs\_volume\_gb) | EBS volume size per data node in GB | `number` | n/a | yes |
+| <a name="input_firehose_security_group_id"></a> [firehose\_security\_group\_id](#input\_firehose\_security\_group\_id) | Security group ID of the Kinesis Firehose delivery stream. Allows HTTPS inbound to OpenSearch from Firehose for CloudFront real-time log ingestion. | `string` | n/a | yes |
+| <a name="input_venue"></a> [venue](#input\_venue) | Tag value for venue (dev, test, prod) | `string` | n/a | yes |
+| <a name="input_availability_zone_count"></a> [availability\_zone\_count](#input\_availability\_zone\_count) | Number of AZs for zone awareness. Must match data\_node\_count and number of vpc\_subnet\_ids. Only used when zone\_awareness\_enabled = true. | `number` | `3` | no |
+| <a name="input_aws_region"></a> [aws\_region](#input\_aws\_region) | Effective AWS Region | `string` | `"us-west-2"` | no |
+| <a name="input_cicd"></a> [cicd](#input\_cicd) | Tag value for CICD deployment method | `string` | `"terraform"` | no |
+| <a name="input_component"></a> [component](#input\_component) | Tag value for component | `string` | `"observability"` | no |
+| <a name="input_data_node_count"></a> [data\_node\_count](#input\_data\_node\_count) | Number of data nodes | `number` | `3` | no |
+| <a name="input_data_node_instance_type"></a> [data\_node\_instance\_type](#input\_data\_node\_instance\_type) | Instance type for data nodes | `string` | `"r6g.xlarge.search"` | no |
+| <a name="input_dedicated_master_enabled"></a> [dedicated\_master\_enabled](#input\_dedicated\_master\_enabled) | Enable dedicated master nodes. Recommended for prod, unnecessary for dev single-node clusters. | `bool` | `true` | no |
+| <a name="input_ebs_volume_type"></a> [ebs\_volume\_type](#input\_ebs\_volume\_type) | EBS volume type | `string` | `"gp3"` | no |
+| <a name="input_ec2_security_group_name"></a> [ec2\_security\_group\_name](#input\_ec2\_security\_group\_name) | Name of the MCP EC2 security group. Used to allow 443 inbound to the OpenSearch domain. Required when vpc\_enabled = true. | `string` | `""` | no |
+| <a name="input_encryption_at_rest"></a> [encryption\_at\_rest](#input\_encryption\_at\_rest) | Enable encryption at rest | `bool` | `true` | no |
+| <a name="input_engine_version"></a> [engine\_version](#input\_engine\_version) | OpenSearch engine version (e.g. OpenSearch\_2.17). Pin to the deployed version to prevent unintended upgrades. | `string` | `"OpenSearch_2.19"` | no |
+| <a name="input_managedby"></a> [managedby](#input\_managedby) | Tag value for owner managing the resource (e.g. PDS Team email distro) | `string` | `"pdsoperator@jpl.nasa.gov"` | no |
+| <a name="input_master_node_count"></a> [master\_node\_count](#input\_master\_node\_count) | Number of dedicated master nodes | `number` | `3` | no |
+| <a name="input_master_node_instance_type"></a> [master\_node\_instance\_type](#input\_master\_node\_instance\_type) | Instance type for dedicated master nodes | `string` | `"m6g.large.search"` | no |
+| <a name="input_node_to_node_encryption"></a> [node\_to\_node\_encryption](#input\_node\_to\_node\_encryption) | Enable node-to-node encryption | `bool` | `true` | no |
+| <a name="input_partition"></a> [partition](#input\_partition) | AWS partition (aws, aws-us-gov, aws-cn) | `string` | `"aws"` | no |
+| <a name="input_tenant"></a> [tenant](#input\_tenant) | Tag value for tenant | `string` | `"en"` | no |
+| <a name="input_vpc_enabled"></a> [vpc\_enabled](#input\_vpc\_enabled) | Deploy the domain inside a VPC. Required when the Logstash EC2 is in a VPC. | `bool` | `false` | no |
+| <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | VPC ID for the OpenSearch domain security group. Required when vpc\_enabled = true. | `string` | `""` | no |
+| <a name="input_vpc_subnet_ids"></a> [vpc\_subnet\_ids](#input\_vpc\_subnet\_ids) | Subnet IDs for the OpenSearch domain VPC endpoint. One subnet per AZ. Required when vpc\_enabled = true. | `list(string)` | `[]` | no |
+| <a name="input_zone_awareness_enabled"></a> [zone\_awareness\_enabled](#input\_zone\_awareness\_enabled) | Enable zone awareness (multi-AZ). Set true for prod (3 nodes, 3 subnets), false for dev (1 node, 1 subnet). | `bool` | `false` | no |
 
-## Outputs / SSM parameters
+## Outputs
 
-| Name | SSM path | Description |
-|---|---|---|
-| `opensearch_endpoint` | `/pds/observability/opensearch/opensearch_endpoint` | HTTPS endpoint of the domain |
-| `opensearch_arn` | `/pds/observability/opensearch/opensearch_arn` | ARN of the domain |
-| `opensearch_domain_name` | — (Terraform output only) | Domain name |
+| Name | Description |
+| ---- | ----------- |
+| <a name="output_opensearch_arn"></a> [opensearch\_arn](#output\_opensearch\_arn) | Managed OpenSearch domain ARN — published to /pds/observability/opensearch/opensearch\_arn |
+| <a name="output_opensearch_domain_name"></a> [opensearch\_domain\_name](#output\_opensearch\_domain\_name) | Managed OpenSearch domain name (Terraform output only, not published to SSM) |
+| <a name="output_opensearch_endpoint"></a> [opensearch\_endpoint](#output\_opensearch\_endpoint) | Managed OpenSearch domain endpoint URL — published to /pds/observability/opensearch/opensearch\_endpoint |
+<!-- END_TF_DOCS -->
 
 ## Deploy
 

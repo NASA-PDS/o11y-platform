@@ -1,0 +1,27 @@
+name: 'Terraform Docs'
+
+on:
+  push:
+    paths: ['terraform/**']
+  pull_request:
+    paths: ['terraform/**']
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: 'terraform-docs (check)'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install terraform-docs
+        run: |
+          curl -sSLo /tmp/terraform-docs.tar.gz \
+            https://github.com/terraform-docs/terraform-docs/releases/download/v0.24.0/terraform-docs-v0.24.0-linux-amd64.tar.gz
+          tar -xzf /tmp/terraform-docs.tar.gz -C /tmp terraform-docs
+          sudo mv /tmp/terraform-docs /usr/local/bin/terraform-docs
+
+      - name: Check docs are up to date
+        working-directory: terraform
+        run: terraform-docs -c .terraform-docs.yml --recursive --recursive-path=. --recursive-include-main=false --output-check .

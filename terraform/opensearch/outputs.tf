@@ -14,15 +14,15 @@ resource "aws_ssm_parameter" "opensearch_arn" {
 
 output "opensearch_endpoint" {
   value       = aws_opensearch_domain.this.endpoint
-  description = "Managed OpenSearch domain endpoint URL"
+  description = "Managed OpenSearch domain endpoint URL — published to /pds/observability/opensearch/opensearch_endpoint"
 }
 
 output "opensearch_domain_name" {
   value       = aws_opensearch_domain.this.domain_name
-  description = "Managed OpenSearch domain name"
+  description = "Managed OpenSearch domain name (Terraform output only, not published to SSM)"
 }
 
 output "opensearch_arn" {
   value       = aws_opensearch_domain.this.arn
-  description = "Managed OpenSearch domain ARN"
+  description = "Managed OpenSearch domain ARN — published to /pds/observability/opensearch/opensearch_arn"
 }
