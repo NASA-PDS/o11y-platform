@@ -60,7 +60,7 @@ resource "aws_security_group" "opensearch" {
   }
 }
 
-resource "aws_opensearch_domain" "pds_opensearch_domain" {
+resource "aws_opensearch_domain" "this" {
   domain_name    = var.domain_name
   engine_version = var.engine_version
 
@@ -118,7 +118,7 @@ resource "aws_opensearch_domain" "pds_opensearch_domain" {
 }
 
 
-resource "aws_opensearch_domain_policy" "domain_access_policy" {
+resource "aws_opensearch_domain_policy" "this" {
   domain_name = var.domain_name
   access_policies = jsonencode({
     Version = "2012-10-17"
@@ -141,5 +141,5 @@ resource "aws_opensearch_domain_policy" "domain_access_policy" {
     ]
   })
 
-  depends_on = [aws_opensearch_domain.pds_opensearch_domain]
+  depends_on = [aws_opensearch_domain.this]
 }
