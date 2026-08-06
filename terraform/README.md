@@ -25,7 +25,7 @@ flowchart LR
         WAIAM["iam/policies"]
     end
 
-    subgraph cf["cloudfront-realtime-monitor"]
+    subgraph cf["cf-realtime-monitor"]
         FH["Kinesis Firehose"]
         FHSG["Firehose Security Group"]
     end
@@ -134,7 +134,7 @@ OpenSearch uses IAM resource-based access (no FGAC). Principals are read from SS
 | SSM path | Published by |
 |---|---|
 | `/pds/web-analytics/iam/ec2_role_arn` | web-analytics `logstash` module on deploy |
-| `/pds/monitor/firehose/firehose-role-arn` | cloudfront-realtime-monitor on deploy |
+| `/pds/monitor/firehose/firehose-role-arn` | cf-realtime-monitor on deploy |
 
 If a consumer hasn't deployed yet, seed the SSM parameter manually:
 

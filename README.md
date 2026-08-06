@@ -14,7 +14,7 @@ flowchart LR
         OS["OpenSearch"]
     end
 
-    subgraph cf["cloudfront-realtime-monitor"]
+    subgraph cf["cf-realtime-monitor"]
         FH["Kinesis Firehose"]
     end
 
@@ -25,7 +25,7 @@ flowchart LR
     OS --> DASH
 ```
 
-OpenSearch is a shared platform — both web-analytics and cloudfront-realtime-monitor write to it. Consumers discover the endpoint via SSM with no shared Terraform state between repos. See [`terraform/README.md`](terraform/README.md) for the full technical architecture and AWS resource details.
+OpenSearch is a shared platform — both web-analytics and cf-realtime-monitor write to it. Consumers discover the endpoint via SSM with no shared Terraform state between repos. See [`terraform/README.md`](terraform/README.md) for the full technical architecture and AWS resource details.
 
 ## Components
 
@@ -38,7 +38,7 @@ OpenSearch is a shared platform — both web-analytics and cloudfront-realtime-m
 | Repo | What it writes |
 |---|---|
 | [web-analytics](https://github.com/NASA-PDS/web-analytics) | Parsed PDS node access logs (ECS v8) |
-| [cloudfront-realtime-monitor](https://github.com/NASA-PDS/cloudfront-realtime-monitor) | CloudFront real-time log stream |
+| [cf-realtime-monitor](https://github.com/NASA-PDS/cf-realtime-monitor) | CloudFront real-time log stream |
 
 ## Development
 
