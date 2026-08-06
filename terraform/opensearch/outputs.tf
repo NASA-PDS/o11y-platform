@@ -3,7 +3,6 @@ resource "aws_ssm_parameter" "opensearch_endpoint" {
   type        = "String"
   value       = aws_opensearch_domain.pds_opensearch_domain.endpoint
   description = "Managed OpenSearch domain endpoint"
-  overwrite   = true
 }
 
 resource "aws_ssm_parameter" "opensearch_arn" {
@@ -11,7 +10,6 @@ resource "aws_ssm_parameter" "opensearch_arn" {
   type        = "String"
   value       = aws_opensearch_domain.pds_opensearch_domain.arn
   description = "Managed OpenSearch domain ARN — consumed by web-analytics IAM policy"
-  overwrite   = true
 }
 
 output "opensearch_endpoint" {
