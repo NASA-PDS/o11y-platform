@@ -110,7 +110,7 @@ No manual `aws ssm put-parameter` seeding is required anywhere in this flow — 
 
 ## Setup
 
-tfvars are tracked in [`cds-infra-deploy`](https://github.com/NASA-PDS/cds-infra-deploy) at
+tfvars are tracked in the `cds-infra-deploy` repo (private GitLab, not GitHub) at
 `venues/<venue>/observability/opensearch.tfvars`, not in this repo — `*.tfvars` here is
 gitignored. Point Task at a local checkout of that repo:
 
