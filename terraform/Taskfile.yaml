@@ -10,6 +10,14 @@
 # Prerequisites:
 #   brew install go-task/tap/go-task
 #   Run `task auth` and follow the instructions to export SSO credentials.
+#
+# tfvars:
+#   By default, tfvars are read from a local cds-infra-deploy checkout:
+#     export CDS_INFRA_DEPLOY_DIR=/path/to/cds-infra-deploy
+#     task opensearch:plan VENUE=dev
+#   To use this repo's own (gitignored) tfvars/ dir instead — e.g. for personal
+#   iteration before promoting values to cds-infra-deploy — pass LOCAL=1:
+#     task opensearch:plan VENUE=dev LOCAL=1
 
 ---
 
@@ -68,8 +76,19 @@ tasks:
             vars:
                 - name: VENUE
                   enum: [dev, test, prod]
+        vars:
+            TFVARS:
+                sh: |
+                    if [ "{{.LOCAL}}" = "1" ]; then
+                        echo "tfvars/{{.VENUE}}.tfvars"
+                    elif [ -n "$CDS_INFRA_DEPLOY_DIR" ]; then
+                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/observability/opensearch.tfvars"
+                    else
+                        echo "Set CDS_INFRA_DEPLOY_DIR (path to a cds-infra-deploy checkout) or pass LOCAL=1 to use this repo's local tfvars/ dir." >&2
+                        exit 1
+                    fi
         cmds:
-            - terraform plan -var-file=tfvars/{{.VENUE}}.tfvars {{.CLI_ARGS}}
+            - terraform plan -var-file={{.TFVARS}} {{.CLI_ARGS}}
 
     opensearch:deploy:
         desc: "Deploy the OpenSearch domain (slow - allow ~15-20 min for domain creation)"
@@ -80,8 +99,19 @@ tasks:
             vars:
                 - name: VENUE
                   enum: [dev, test, prod]
+        vars:
+            TFVARS:
+                sh: |
+                    if [ "{{.LOCAL}}" = "1" ]; then
+                        echo "tfvars/{{.VENUE}}.tfvars"
+                    elif [ -n "$CDS_INFRA_DEPLOY_DIR" ]; then
+                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/observability/opensearch.tfvars"
+                    else
+                        echo "Set CDS_INFRA_DEPLOY_DIR (path to a cds-infra-deploy checkout) or pass LOCAL=1 to use this repo's local tfvars/ dir." >&2
+                        exit 1
+                    fi
         cmds:
-            - terraform apply -var-file=tfvars/{{.VENUE}}.tfvars {{.CLI_ARGS}}
+            - terraform apply -var-file={{.TFVARS}} {{.CLI_ARGS}}
 
     opensearch:destroy:
         desc: "Destroy the OpenSearch domain (destroys all indexed data)"
@@ -91,8 +121,19 @@ tasks:
             vars:
                 - name: VENUE
                   enum: [dev, test, prod]
+        vars:
+            TFVARS:
+                sh: |
+                    if [ "{{.LOCAL}}" = "1" ]; then
+                        echo "tfvars/{{.VENUE}}.tfvars"
+                    elif [ -n "$CDS_INFRA_DEPLOY_DIR" ]; then
+                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/observability/opensearch.tfvars"
+                    else
+                        echo "Set CDS_INFRA_DEPLOY_DIR (path to a cds-infra-deploy checkout) or pass LOCAL=1 to use this repo's local tfvars/ dir." >&2
+                        exit 1
+                    fi
         cmds:
-            - terraform apply -destroy -var-file=tfvars/{{.VENUE}}.tfvars {{.CLI_ARGS}}
+            - terraform apply -destroy -var-file={{.TFVARS}} {{.CLI_ARGS}}
 
     opensearch:refresh:
         desc: "Refresh OpenSearch module Terraform state"
@@ -102,8 +143,19 @@ tasks:
             vars:
                 - name: VENUE
                   enum: [dev, test, prod]
+        vars:
+            TFVARS:
+                sh: |
+                    if [ "{{.LOCAL}}" = "1" ]; then
+                        echo "tfvars/{{.VENUE}}.tfvars"
+                    elif [ -n "$CDS_INFRA_DEPLOY_DIR" ]; then
+                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/observability/opensearch.tfvars"
+                    else
+                        echo "Set CDS_INFRA_DEPLOY_DIR (path to a cds-infra-deploy checkout) or pass LOCAL=1 to use this repo's local tfvars/ dir." >&2
+                        exit 1
+                    fi
         cmds:
-            - terraform plan -refresh-only -var-file=tfvars/{{.VENUE}}.tfvars {{.CLI_ARGS}}
+            - terraform plan -refresh-only -var-file={{.TFVARS}} {{.CLI_ARGS}}
 
     opensearch:sync:
         desc: "Apply refresh-only to sync OpenSearch state without changing infrastructure"
@@ -113,8 +165,19 @@ tasks:
             vars:
                 - name: VENUE
                   enum: [dev, test, prod]
+        vars:
+            TFVARS:
+                sh: |
+                    if [ "{{.LOCAL}}" = "1" ]; then
+                        echo "tfvars/{{.VENUE}}.tfvars"
+                    elif [ -n "$CDS_INFRA_DEPLOY_DIR" ]; then
+                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/observability/opensearch.tfvars"
+                    else
+                        echo "Set CDS_INFRA_DEPLOY_DIR (path to a cds-infra-deploy checkout) or pass LOCAL=1 to use this repo's local tfvars/ dir." >&2
+                        exit 1
+                    fi
         cmds:
-            - terraform apply -refresh-only -var-file=tfvars/{{.VENUE}}.tfvars {{.CLI_ARGS}}
+            - terraform apply -refresh-only -var-file={{.TFVARS}} {{.CLI_ARGS}}
 
     opensearch:show:
         desc: "Show OpenSearch domain Terraform state"
