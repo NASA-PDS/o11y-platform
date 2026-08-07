@@ -74,7 +74,7 @@ tasks:
     opensearch:deploy:
         desc: "Deploy the OpenSearch domain (slow - allow ~15-20 min for domain creation)"
         aliases: ["opensearch:apply"]
-        deps: ["opensearch:validate"]
+        deps: ["opensearch:init"]
         dir: opensearch
         requires:
             vars:
@@ -85,6 +85,7 @@ tasks:
 
     opensearch:destroy:
         desc: "Destroy the OpenSearch domain (destroys all indexed data)"
+        deps: ["opensearch:init"]
         dir: opensearch
         requires:
             vars:
