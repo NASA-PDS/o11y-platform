@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Sub-component repos that consume this platform:**
 - [web-analytics](https://github.com/NASA-PDS/web-analytics) — Logstash EC2 ingesting node access logs
-- [cloudfront-realtime-monitor](https://github.com/NASA-PDS/cloudfront-realtime-monitor) — Kinesis Firehose ingesting CloudFront real-time logs
+- [cf-realtime-monitor](https://github.com/NASA-PDS/cf-realtime-monitor) — Kinesis Firehose ingesting CloudFront real-time logs
 
 > **Note:** `src/`, `tests/`, `pyproject.toml`, `setup.cfg`, `tox.ini`, and `.pre-commit-config.yaml` are unmodified boilerplate from the [pds-template-repo-python](https://github.com/NASA-PDS/pds-template-repo-python) (package still named `your_package_name`). There is no real Python code in this repo — don't treat that scaffolding as part of the actual project.
 
