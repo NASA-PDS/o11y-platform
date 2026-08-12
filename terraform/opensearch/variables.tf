@@ -104,9 +104,16 @@ variable "ec2_security_group_name" {
   default     = ""
 }
 
-variable "firehose_security_group_id" {
-  type        = string
-  description = "Security group ID of the Kinesis Firehose delivery stream. Allows HTTPS inbound to OpenSearch from Firehose for CloudFront real-time log ingestion."
+variable "web_analytics_enabled" {
+  type        = bool
+  description = "Whether the web-analytics consumer has been deployed. When true, its Logstash EC2 role ARN is read from SSM (/pds/web-analytics/iam/ec2_role_arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before web-analytics' iam/policies module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment."
+  default     = false
+}
+
+variable "realtime_monitor_enabled" {
+  type        = bool
+  description = "Whether the cf-realtime-monitor consumer has been deployed. When true, its Firehose role ARN is read from SSM (/pds/monitor/firehose/firehose-role-arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before cf-realtime-monitor's iam module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment. cf-realtime-monitor manages its own Firehose→OpenSearch security-group ingress rule, so no SG input is needed here."
+  default     = false
 }
 
 variable "venue" {

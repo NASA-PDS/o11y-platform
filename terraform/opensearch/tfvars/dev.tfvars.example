@@ -16,10 +16,15 @@ dedicated_master_enabled  = false
 zone_awareness_enabled    = false
 
 # VPC — OpenSearch deployed inside the same VPC as Logstash EC2
-vpc_enabled           = true
-vpc_id                = ""
-vpc_subnet_ids        = []
-ec2_security_group_name    = ""   # Name of the MCP EC2 security group
-firehose_security_group_id = ""   # SG ID of the Kinesis Firehose delivery stream
+vpc_enabled              = true
+vpc_id                   = ""
+vpc_subnet_ids           = []
+ec2_security_group_name  = ""   # Name of the MCP EC2 security group
+
+# Leave both false for the initial bootstrap deploy — flip to true and re-apply
+# (access-policy update only, no domain redeployment) once each consumer has
+# deployed and published its role ARN to SSM. See terraform/README.md#deployment-flow.
+web_analytics_enabled    = false
+realtime_monitor_enabled = false
 
 engine_version = "OpenSearch_2.19"
