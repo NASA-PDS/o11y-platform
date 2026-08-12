@@ -98,7 +98,7 @@ No manual `aws ssm put-parameter` seeding is required anywhere in this flow — 
 
 ## Prerequisites
 
-- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.0
+- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.10.0
 - [Task](https://taskfile.dev) — `brew install go-task/tap/go-task`
 - AWS credentials exported:
   ```bash
