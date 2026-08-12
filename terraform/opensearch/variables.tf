@@ -82,8 +82,7 @@ variable "encryption_at_rest" {
 
 variable "vpc_enabled" {
   type        = bool
-  description = "Deploy the domain inside a VPC. Required when the Logstash EC2 is in a VPC."
-  default     = false
+  description = "Deploy the domain inside a VPC. This module is intended to be VPC-only."
 }
 
 variable "vpc_id" {
