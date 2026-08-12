@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Prerequisites
 
-- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.0
+- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.10.0
 - [Task](https://taskfile.dev) — `brew install go-task/tap/go-task`
 - AWS credentials exported to the shell (S3 backend requires `AWS_PROFILE` to be unset):
   ```bash
