@@ -16,11 +16,15 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Install terraform-docs
+        env:
+          TERRAFORM_DOCS_VERSION: v0.24.0
+        working-directory: /tmp
         run: |
-          curl -sSLo /tmp/terraform-docs.tar.gz \
-            https://github.com/terraform-docs/terraform-docs/releases/download/v0.24.0/terraform-docs-v0.24.0-linux-amd64.tar.gz
-          tar -xzf /tmp/terraform-docs.tar.gz -C /tmp terraform-docs
-          sudo mv /tmp/terraform-docs /usr/local/bin/terraform-docs
+          curl -sSLO "https://github.com/terraform-docs/terraform-docs/releases/download/${TERRAFORM_DOCS_VERSION}/terraform-docs-${TERRAFORM_DOCS_VERSION}-linux-amd64.tar.gz"
+          curl -sSLO "https://github.com/terraform-docs/terraform-docs/releases/download/${TERRAFORM_DOCS_VERSION}/terraform-docs-${TERRAFORM_DOCS_VERSION}.sha256sum"
+          sha256sum --ignore-missing -c "terraform-docs-${TERRAFORM_DOCS_VERSION}.sha256sum"
+          tar -xzf "terraform-docs-${TERRAFORM_DOCS_VERSION}-linux-amd64.tar.gz" terraform-docs
+          sudo mv terraform-docs /usr/local/bin/terraform-docs
 
       - name: Check docs are up to date
         working-directory: terraform
