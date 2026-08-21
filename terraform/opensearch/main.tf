@@ -139,7 +139,7 @@ resource "aws_opensearch_domain_policy" "this" {
         Principal = {
           AWS = local.opensearch_access_principals
         }
-        Action = "es:*"
+        Action = "es:ESHttp*"
         Resource = [
           "arn:${var.partition}:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.domain_name}",
           "arn:${var.partition}:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.domain_name}/*",

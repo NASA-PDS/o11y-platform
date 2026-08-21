@@ -148,9 +148,9 @@ No Firehose SG ID input is needed — cf-realtime-monitor creates its own ingres
 cd terraform/
 
 task opensearch:init    VENUE=dev
-task opensearch:plan    VENUE=dev
-task opensearch:deploy  VENUE=dev
-task opensearch:endpoint VENUE=dev   # confirm endpoint stored in SSM
+task opensearch:plan    VENUE=dev LOCAL=1
+task opensearch:deploy  VENUE=dev LOCAL=1
+task opensearch:endpoint             # confirm endpoint stored in SSM
 ```
 
 After deploy, the endpoint, domain ARN, and security group ID are published to SSM automatically:

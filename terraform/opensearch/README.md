@@ -82,8 +82,8 @@ No modules.
 cp tfvars/dev.tfvars.example tfvars/dev.tfvars
 # edit tfvars/dev.tfvars — fill in vpc_id, subnet_ids, security group IDs
 
-task opensearch:plan   VENUE=dev
-task opensearch:deploy VENUE=dev
+task opensearch:plan   VENUE=dev LOCAL=1
+task opensearch:deploy VENUE=dev LOCAL=1
 ```
 
 Domain creation takes ~15–20 minutes. Plan output is intentionally not saved with `-out` — re-run plan immediately before apply.

@@ -193,10 +193,6 @@ tasks:
     opensearch:endpoint:
         desc: "Print the OpenSearch endpoint from SSM"
         silent: true
-        requires:
-            vars:
-                - name: VENUE
-                  enum: [dev, test, prod]
         cmds:
             - |
               aws ssm get-parameter \

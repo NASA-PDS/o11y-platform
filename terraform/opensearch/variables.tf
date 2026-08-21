@@ -83,6 +83,10 @@ variable "encryption_at_rest" {
 variable "vpc_enabled" {
   type        = bool
   description = "Deploy the domain inside a VPC. This module is intended to be VPC-only."
+  validation {
+    condition     = var.vpc_enabled == true
+    error_message = "vpc_enabled must be true — this module is VPC-only and does not support a public endpoint."
+  }
 }
 
 variable "vpc_id" {
