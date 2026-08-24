@@ -17,7 +17,7 @@ resource "aws_ssm_parameter" "opensearch_security_group_id" {
   name        = "${local.ssm_prefix}/opensearch_security_group_id"
   type        = "String"
   value       = aws_security_group.opensearch[0].id
-  description = "OpenSearch domain VPC security group ID — consumed by cf-realtime-monitor to add a Firehose ingress rule"
+  description = "OpenSearch domain VPC security group ID — consumed by o11y-cloudfront-streaming to add a Firehose ingress rule"
 }
 
 output "opensearch_endpoint" {

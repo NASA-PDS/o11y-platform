@@ -9,7 +9,7 @@ data "aws_ssm_parameter" "ec2_role_arn" {
 
 data "aws_ssm_parameter" "cloudfront_realtime_firehose_role_arn" {
   count = var.realtime_monitor_enabled ? 1 : 0
-  name  = "/pds/web-analytics-realtime/firehose/firehose-role-arn"
+  name  = "/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn"
 }
 
 data "aws_security_group" "mcp_ec2" {
@@ -45,7 +45,7 @@ resource "aws_security_group" "opensearch" {
     security_groups = [data.aws_security_group.mcp_ec2[0].id]
   }
 
-  # No inline Firehose ingress rule here — web-analytics-realtime manages its own
+  # No inline Firehose ingress rule here — o11y-cloudfront-streaming manages its own
   # aws_vpc_security_group_ingress_rule against this SG's ID (read from SSM,
   # see outputs.tf), so it isn't gated by realtime_monitor_enabled.
 

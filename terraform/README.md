@@ -25,7 +25,7 @@ flowchart LR
         WAIAM["iam/policies"]
     end
 
-    subgraph cf["cf-realtime-monitor"]
+    subgraph cf["o11y-cloudfront-streaming"]
         FH["Kinesis Firehose"]
         FHSG["Firehose Security Group"]
     end
@@ -40,12 +40,12 @@ flowchart LR
     SSM_OUT -.->|"endpoint, reads at plan time"| FH
     SSM_OUT -.->|"arn, reads at plan time"| WAIAM
     SSM_OUT -.->|"security_group_id,\nreads at plan time"| FHSG
-    FHSG -->|"cf-realtime-monitor manages this rule:\naws_vpc_security_group_ingress_rule"| SG
+    FHSG -->|"o11y-cloudfront-streaming manages this rule:\naws_vpc_security_group_ingress_rule"| SG
     LS -->|"HTTPS"| SG
     FH -->|"HTTPS"| SG
 ```
 
-Network access is controlled by Security Group ingress rules (port 443). The EC2 SG rule lives here, since the MCP EC2 SG is pre-existing shared infra; the Firehose SG rule is instead created and owned by cf-realtime-monitor itself, as a separate `aws_vpc_security_group_ingress_rule` resource targeting this repo's SG by ID (read from SSM) — this repo no longer takes a Firehose SG ID as an input. API access is controlled by an IAM resource-based policy whose principals are role ARNs read from SSM at plan time, gated by the `web_analytics_enabled` / `realtime_monitor_enabled` flags (see [Access control](#access-control)) so the domain can bootstrap before either consumer exists. The domain's endpoint, ARN, and security group ID are published to SSM after deploy; consumers read them at Terraform plan time (dashed lines) with no shared state between repos. The ARN is consumed by web-analytics' `iam/policies` module to scope the Logstash EC2 role's OpenSearch permissions.
+Network access is controlled by Security Group ingress rules (port 443). The EC2 SG rule lives here, since the MCP EC2 SG is pre-existing shared infra; the Firehose SG rule is instead created and owned by o11y-cloudfront-streaming itself, as a separate `aws_vpc_security_group_ingress_rule` resource targeting this repo's SG by ID (read from SSM) — this repo no longer takes a Firehose SG ID as an input. API access is controlled by an IAM resource-based policy whose principals are role ARNs read from SSM at plan time, gated by the `web_analytics_enabled` / `realtime_monitor_enabled` flags (see [Access control](#access-control)) so the domain can bootstrap before either consumer exists. The domain's endpoint, ARN, and security group ID are published to SSM after deploy; consumers read them at Terraform plan time (dashed lines) with no shared state between repos. The ARN is consumed by web-analytics' `iam/policies` module to scope the Logstash EC2 role's OpenSearch permissions.
 
 ## Deployment flow
 
@@ -60,7 +60,7 @@ flowchart TD
         S3["S3 bucket"]
     end
 
-    subgraph p2cf["Phase 2 — cf-realtime-monitor"]
+    subgraph p2cf["Phase 2 — o11y-cloudfront-streaming"]
         CFIAM["iam/ (own state, deploy first)"]
         CFMAIN["terraform apply\n(firehose, kinesis, lambda, CloudFront)"]
         CFIAM --> CFMAIN
@@ -87,7 +87,7 @@ flowchart TD
 1. **(1) Bootstrap OpenSearch** — with `web_analytics_enabled = false` and `realtime_monitor_enabled = false` in tfvars: `task opensearch:deploy VENUE=dev` (~15-20 min). Publishes endpoint, ARN, and security group ID to SSM. The domain has **no access policy yet** at this point — that's expected, since neither consumer has published a role ARN.
 2. **(2) Deploy both consumers** — each reads what it needs from SSM at plan time and can deploy immediately after step 1 completes, independently of the other:
    - `web-analytics`: `task iam:deploy VENUE=dev` (publishes `ec2_role_arn`), then `task s3:deploy VENUE=dev`
-   - `cf-realtime-monitor`: `iam/` module first — own state, publishes `firehose_role_arn` — then the root module (creates the Firehose infra plus its own Firehose→OpenSearch security-group ingress rule, referencing this repo's SG ID from SSM)
+   - `o11y-cloudfront-streaming`: `iam/` module first — own state, publishes `firehose_role_arn` — then the root module (creates the Firehose infra plus its own Firehose→OpenSearch security-group ingress rule, referencing this repo's SG ID from SSM)
    - Both `terraform apply`s in this phase succeed, but neither Logstash nor Firehose can actually reach the OpenSearch API yet — the access policy from step 1 doesn't grant them anything.
 3. **(3) Grant access** — back in this repo, set `web_analytics_enabled = true` and/or `realtime_monitor_enabled = true` in tfvars (independently, whenever each consumer's `iam` module has published its ARN) and re-run `task opensearch:deploy VENUE=dev`. This only updates the access policy — no domain redeployment.
 4. **(4) Finish web-analytics** — `task logstash:deploy VENUE=dev` — reads OpenSearch endpoint and bucket name from SSM at plan time.
@@ -134,9 +134,9 @@ task opensearch:plan VENUE=dev LOCAL=1
 | `vpc_id`, `vpc_subnet_ids` | VPC where the OpenSearch endpoint is placed (private subnets) |
 | `ec2_security_group_name` | MCP EC2 SG name — allows Logstash HTTPS inbound (pre-existing shared infra, unconditional) |
 | `web_analytics_enabled` | Set `false` for the initial bootstrap deploy; `true` once web-analytics' `iam/policies` module has published `ec2_role_arn` — see [Access control](#access-control) |
-| `realtime_monitor_enabled` | Set `false` for the initial bootstrap deploy; `true` once cf-realtime-monitor's `iam/` module has published `firehose_role_arn` — see [Access control](#access-control) |
+| `realtime_monitor_enabled` | Set `false` for the initial bootstrap deploy; `true` once o11y-cloudfront-streaming's `iam/` module has published `firehose_role_arn` — see [Access control](#access-control) |
 
-No Firehose SG ID input is needed — cf-realtime-monitor creates its own ingress rule against this domain's SG (see [Technical architecture](#technical-architecture)).
+No Firehose SG ID input is needed — o11y-cloudfront-streaming creates its own ingress rule against this domain's SG (see [Technical architecture](#technical-architecture)).
 
 ---
 
@@ -171,7 +171,7 @@ OpenSearch uses IAM resource-based access (no FGAC). Principals are read from SS
 | tfvars flag | SSM path (read only when the flag is `true`) | Published by |
 |---|---|---|
 | `web_analytics_enabled` | `/pds/web-analytics/iam/ec2_role_arn` | web-analytics `iam/policies` module on deploy |
-| `realtime_monitor_enabled` | `/pds/monitor/firehose/firehose-role-arn` | cf-realtime-monitor `iam/` module on deploy |
+| `realtime_monitor_enabled` | `/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn` | o11y-cloudfront-streaming `iam/` module on deploy |
 
 Both default to `false`. With both false, `aws_opensearch_domain_policy` isn't created at all — an access policy with an empty `Principal.AWS` is invalid, and on the initial bootstrap deploy neither ARN exists in SSM yet. Once a consumer's `iam` module has deployed and published its role ARN, flip the matching flag to `true` in tfvars and re-run `task opensearch:deploy VENUE=<venue>` (or `task opensearch:plan` first to confirm) — this only updates the access policy, no domain redeployment. The two flags are independent, so each consumer can be enabled as soon as it's ready without waiting on the other.
 

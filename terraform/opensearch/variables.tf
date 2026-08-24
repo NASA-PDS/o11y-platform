@@ -115,7 +115,7 @@ variable "web_analytics_enabled" {
 
 variable "realtime_monitor_enabled" {
   type        = bool
-  description = "Whether the web-analytics-realtime consumer has been deployed. When true, its Firehose role ARN is read from SSM (/pds/web-analytics-realtime/firehose/firehose-role-arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before web-analytics-realtime's iam module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment. web-analytics-realtime manages its own Firehose→OpenSearch security-group ingress rule, so no SG input is needed here."
+  description = "Whether the o11y-cloudfront-streaming consumer has been deployed. When true, its Firehose role ARN is read from SSM (/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before o11y-cloudfront-streaming's iam module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment. o11y-cloudfront-streaming manages its own Firehose→OpenSearch security-group ingress rule, so no SG input is needed here."
   default     = false
 }
 
