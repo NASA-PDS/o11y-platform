@@ -63,17 +63,17 @@ No modules.
 | <a name="input_tenant"></a> [tenant](#input\_tenant) | Tag value for tenant | `string` | `"en"` | no |
 | <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | VPC ID for the OpenSearch domain security group. Required when vpc\_enabled = true. | `string` | `""` | no |
 | <a name="input_vpc_subnet_ids"></a> [vpc\_subnet\_ids](#input\_vpc\_subnet\_ids) | Subnet IDs for the OpenSearch domain VPC endpoint. One subnet per AZ. Required when vpc\_enabled = true. | `list(string)` | `[]` | no |
-| <a name="input_web_analytics_enabled"></a> [web\_analytics\_enabled](#input\_web\_analytics\_enabled) | Whether the web-analytics consumer has been deployed. When true, its Logstash EC2 role ARN is read from SSM (/pds/web-analytics/iam/ec2\_role\_arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before web-analytics' iam/policies module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment. | `bool` | `false` | no |
+| <a name="input_web_analytics_enabled"></a> [web\_analytics\_enabled](#input\_web\_analytics\_enabled) | Whether the web-analytics consumer has been deployed. When true, its Logstash EC2 role ARN is read from SSM (/pds/o11y-cloudfront-batch/iam/ec2\_role\_arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before o11y-cloudfront-batch's iam/policies module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment. | `bool` | `false` | no |
 | <a name="input_zone_awareness_enabled"></a> [zone\_awareness\_enabled](#input\_zone\_awareness\_enabled) | Enable zone awareness (multi-AZ). Set true for prod (3 nodes, 3 subnets), false for dev (1 node, 1 subnet). | `bool` | `false` | no |
 
 ## Outputs
 
 | Name | Description |
 | ---- | ----------- |
-| <a name="output_opensearch_arn"></a> [opensearch\_arn](#output\_opensearch\_arn) | Managed OpenSearch domain ARN — published to /pds/observability/opensearch/opensearch\_arn |
+| <a name="output_opensearch_arn"></a> [opensearch\_arn](#output\_opensearch\_arn) | Managed OpenSearch domain ARN — published to /pds/o11y-platform/opensearch/opensearch\_arn |
 | <a name="output_opensearch_domain_name"></a> [opensearch\_domain\_name](#output\_opensearch\_domain\_name) | Managed OpenSearch domain name (Terraform output only, not published to SSM) |
-| <a name="output_opensearch_endpoint"></a> [opensearch\_endpoint](#output\_opensearch\_endpoint) | Managed OpenSearch domain endpoint URL — published to /pds/observability/opensearch/opensearch\_endpoint |
-| <a name="output_opensearch_security_group_id"></a> [opensearch\_security\_group\_id](#output\_opensearch\_security\_group\_id) | OpenSearch domain VPC security group ID — published to /pds/observability/opensearch/opensearch\_security\_group\_id when vpc\_enabled |
+| <a name="output_opensearch_endpoint"></a> [opensearch\_endpoint](#output\_opensearch\_endpoint) | Managed OpenSearch domain endpoint URL — published to /pds/o11y-platform/opensearch/opensearch\_endpoint |
+| <a name="output_opensearch_security_group_id"></a> [opensearch\_security\_group\_id](#output\_opensearch\_security\_group\_id) | OpenSearch domain VPC security group ID — published to /pds/o11y-platform/opensearch/opensearch\_security\_group\_id when vpc\_enabled |
 <!-- END_TF_DOCS -->
 
 ## Deploy

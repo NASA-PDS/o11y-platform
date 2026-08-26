@@ -4,7 +4,7 @@ data "aws_caller_identity" "current" {}
 # see web_analytics_enabled / realtime_monitor_enabled in variables.tf.
 data "aws_ssm_parameter" "ec2_role_arn" {
   count = var.web_analytics_enabled ? 1 : 0
-  name  = "/pds/web-analytics/iam/ec2_role_arn"
+  name  = "/pds/o11y-cloudfront-batch/iam/ec2_role_arn"
 }
 
 data "aws_ssm_parameter" "cloudfront_realtime_firehose_role_arn" {
@@ -20,7 +20,7 @@ data "aws_security_group" "mcp_ec2" {
 
 locals {
   module_relative_path = replace(abspath(path.module), "/^.*\\/terraform\\//", "")
-  ssm_prefix           = "/pds/observability/${local.module_relative_path}"
+  ssm_prefix           = "/pds/o11y-platform/${local.module_relative_path}"
 
   opensearch_access_principals = concat(
     var.web_analytics_enabled ? [data.aws_ssm_parameter.ec2_role_arn[0].value] : [],

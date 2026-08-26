@@ -12,12 +12,12 @@ flowchart LR
     end
 
     subgraph ssm_in["SSM inputs (read only when the matching *_enabled flag is true)"]
-        EC2ARN["/pds/web-analytics/iam/ec2_role_arn"]
+        EC2ARN["/pds/o11y-cloudfront-batch/iam/ec2_role_arn"]
         FHARN["/pds/monitor/firehose/firehose-role-arn"]
     end
 
     POL["IAM Access Policy\n(resource-based, conditional —\nabsent until a consumer is enabled)"]
-    SSM_OUT["SSM outputs\n/pds/observability/opensearch\n/opensearch_endpoint\n/opensearch_arn\n/opensearch_security_group_id"]
+    SSM_OUT["SSM outputs\n/pds/o11y-platform/opensearch\n/opensearch_endpoint\n/opensearch_arn\n/opensearch_security_group_id"]
 
     subgraph wa["web-analytics"]
         LS["Logstash EC2"]
@@ -111,7 +111,7 @@ No manual `aws ssm put-parameter` seeding is required anywhere in this flow — 
 ## Setup
 
 tfvars are tracked in the `cds-infra-deploy` repo (private GitLab, not GitHub) at
-`venues/<venue>/observability/opensearch.tfvars`, not in this repo — `*.tfvars` here is
+`venues/<venue>/o11y-platform/opensearch.tfvars`, not in this repo — `*.tfvars` here is
 gitignored. Point Task at a local checkout of that repo:
 
 ```bash
@@ -155,9 +155,9 @@ task opensearch:endpoint             # confirm endpoint stored in SSM
 
 After deploy, the endpoint, domain ARN, and security group ID are published to SSM automatically:
 ```
-/pds/observability/opensearch/opensearch_endpoint
-/pds/observability/opensearch/opensearch_arn
-/pds/observability/opensearch/opensearch_security_group_id
+/pds/o11y-platform/opensearch/opensearch_endpoint
+/pds/o11y-platform/opensearch/opensearch_arn
+/pds/o11y-platform/opensearch/opensearch_security_group_id
 ```
 
 See [Deployment flow](#deployment-flow) above for when to re-run this with `web_analytics_enabled` / `realtime_monitor_enabled` set to `true`.
@@ -170,7 +170,7 @@ OpenSearch uses IAM resource-based access (no FGAC). Principals are read from SS
 
 | tfvars flag | SSM path (read only when the flag is `true`) | Published by |
 |---|---|---|
-| `web_analytics_enabled` | `/pds/web-analytics/iam/ec2_role_arn` | web-analytics `iam/policies` module on deploy |
+| `web_analytics_enabled` | `/pds/o11y-cloudfront-batch/iam/ec2_role_arn` | o11y-cloudfront-batch `iam/policies` module on deploy |
 | `realtime_monitor_enabled` | `/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn` | o11y-cloudfront-streaming `iam/` module on deploy |
 
 Both default to `false`. With both false, `aws_opensearch_domain_policy` isn't created at all — an access policy with an empty `Principal.AWS` is invalid, and on the initial bootstrap deploy neither ARN exists in SSM yet. Once a consumer's `iam` module has deployed and published its role ARN, flip the matching flag to `true` in tfvars and re-run `task opensearch:deploy VENUE=<venue>` (or `task opensearch:plan` first to confirm) — this only updates the access policy, no domain redeployment. The two flags are independent, so each consumer can be enabled as soon as it's ready without waiting on the other.
@@ -189,6 +189,6 @@ task opensearch:destroy VENUE=dev   # destroys all indexed data — irreversible
 
 ## Architecture notes
 
-- **State** — S3 backend, key `observability/opensearch.tfstate`.
+- **State** — S3 backend, key `o11y-platform/opensearch.tfstate`.
 - **VPC/SG values** are in tfvars. TODO: source EC2 SG from SSM under `/pds/cds-infra/vpc/security_groups/` once MCP publishes it.
 - **Adding a new consumer** — publish its role ARN to SSM, add a `data "aws_ssm_parameter"` block in `opensearch/main.tf`, add the ARN to the access policy principals, and add an SG ingress rule if needed.

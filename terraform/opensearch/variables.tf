@@ -109,7 +109,7 @@ variable "ec2_security_group_name" {
 
 variable "web_analytics_enabled" {
   type        = bool
-  description = "Whether the web-analytics consumer has been deployed. When true, its Logstash EC2 role ARN is read from SSM (/pds/web-analytics/iam/ec2_role_arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before web-analytics' iam/policies module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment."
+  description = "Whether the web-analytics consumer has been deployed. When true, its Logstash EC2 role ARN is read from SSM (/pds/o11y-cloudfront-batch/iam/ec2_role_arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before o11y-cloudfront-batch's iam/policies module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment."
   default     = false
 }
 
