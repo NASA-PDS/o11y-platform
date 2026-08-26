@@ -9,13 +9,18 @@ data "aws_ssm_parameter" "ec2_role_arn" {
 
 data "aws_ssm_parameter" "cloudfront_realtime_firehose_role_arn" {
   count = var.realtime_monitor_enabled ? 1 : 0
-  name  = "/pds/monitor/firehose/firehose-role-arn"
+  name  = "/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn"
 }
 
 data "aws_security_group" "mcp_ec2" {
   count  = var.vpc_enabled ? 1 : 0
   name   = var.ec2_security_group_name
   vpc_id = var.vpc_id
+}
+
+data "aws_ssm_parameter" "firehose_security_group_id" {
+  count = var.realtime_monitor_enabled ? 1 : 0
+  name  = "/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id"
 }
 
 locals {
@@ -45,10 +50,6 @@ resource "aws_security_group" "opensearch" {
     security_groups = [data.aws_security_group.mcp_ec2[0].id]
   }
 
-  # No inline Firehose ingress rule here — cf-realtime-monitor manages its own
-  # aws_vpc_security_group_ingress_rule against this SG's ID (read from SSM,
-  # see outputs.tf), so it isn't gated by realtime_monitor_enabled.
-
   egress {
     from_port   = 0
     to_port     = 0
@@ -63,6 +64,18 @@ resource "aws_security_group" "opensearch" {
   lifecycle {
     ignore_changes = [tags]
   }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "opensearch_https_from_firehose" {
+  count                        = var.realtime_monitor_enabled ? 1 : 0
+  security_group_id            = aws_security_group.opensearch[0].id
+  referenced_security_group_id = data.aws_ssm_parameter.firehose_security_group_id[0].value
+
+  from_port   = 443
+  to_port     = 443
+  ip_protocol = "tcp"
+
+  description = "Allow HTTPS from the o11y-cloudfront-streaming Firehose security group."
 }
 
 resource "aws_opensearch_domain" "this" { #NOSONAR
