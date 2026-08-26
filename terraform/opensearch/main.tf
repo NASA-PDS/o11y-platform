@@ -65,7 +65,7 @@ resource "aws_security_group" "opensearch" {
   }
 }
 
-resource "aws_opensearch_domain" "this" {
+resource "aws_opensearch_domain" "this" { #NOSONAR
   domain_name    = var.domain_name
   engine_version = var.engine_version
 
@@ -108,9 +108,9 @@ resource "aws_opensearch_domain" "this" {
   # Fine-grained access control (FGAC) is intentionally disabled: access is restricted
   # to known IAM role ARNs via resource policy on a VPC-only domain, which is sufficient
   # for this use case. AUDIT_LOGS require FGAC to be enabled, so that log type is
-  # unavailable here by design. #NOSONAR
+  # unavailable here by design.
   advanced_security_options {
-    enabled = false #NOSONAR
+    enabled = false
   }
 
   dynamic "vpc_options" {
