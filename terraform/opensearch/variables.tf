@@ -107,13 +107,13 @@ variable "ec2_security_group_name" {
   default     = ""
 }
 
-variable "web_analytics_enabled" {
+variable "o11y_cloudfront_batch_enabled" {
   type        = bool
-  description = "Whether the web-analytics consumer has been deployed. When true, its Logstash EC2 role ARN is read from SSM (/pds/o11y-cloudfront-batch/iam/ec2_role_arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before o11y-cloudfront-batch's iam/policies module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment."
+  description = "Whether the o11y-cloudfront-batch consumer has been deployed. When true, its Logstash EC2 role ARN is read from SSM (/pds/o11y-cloudfront-batch/iam/ec2_role_arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before o11y-cloudfront-batch's iam/policies module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment."
   default     = false
 }
 
-variable "realtime_monitor_enabled" {
+variable "o11y_cloudfront_streaming_enabled" {
   type        = bool
   description = "Whether the o11y-cloudfront-streaming consumer has been deployed. When true, its Firehose role ARN is read from SSM (/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before o11y-cloudfront-streaming's iam module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment. o11y-cloudfront-streaming manages its own Firehose→OpenSearch security-group ingress rule, so no SG input is needed here."
   default     = false
@@ -133,7 +133,7 @@ variable "tenant" {
 variable "component" {
   type        = string
   description = "Tag value for component"
-  default     = "observability"
+  default     = "o11y-platform"
 }
 
 variable "cicd" {

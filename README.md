@@ -1,20 +1,20 @@
-# Planetary Data Cloud (PDC) Observability
+# Planetary Data Cloud (PDC) o11y-platform
 
-Shared OpenSearch-backed Observability platform for the Planetary Data Cloud. Aggregates logs from PDS services such as web-analytics and CloudFront realtime monitoring for search and dashboards
+Shared OpenSearch-backed observability platform for the Planetary Data Cloud. Aggregates logs from PDS services such as o11y-cloudfront-batch and CloudFront realtime monitoring for search and dashboards
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    subgraph wa["web-analytics"]
+    subgraph wa["o11y-cloudfront-batch"]
         LS["Logstash EC2"]
     end
 
-    subgraph obs["pdc-observability"]
+    subgraph obs["o11y-platform"]
         OS["OpenSearch"]
     end
 
-    subgraph cf["cf-realtime-monitor"]
+    subgraph cf["o11y-cloudfront-streaming"]
         FH["Kinesis Firehose"]
     end
 
@@ -25,7 +25,7 @@ flowchart LR
     OS --> DASH
 ```
 
-OpenSearch is a shared platform — both web-analytics and cf-realtime-monitor write to it. Consumers discover the endpoint via SSM with no shared Terraform state between repos. See [`terraform/README.md`](terraform/README.md) for the full technical architecture and AWS resource details.
+OpenSearch is a shared platform — both o11y-cloudfront-batch and o11y-cloudfront-streaming write to it. Consumers discover the endpoint via SSM with no shared Terraform state between repos. See [`terraform/README.md`](terraform/README.md) for the full technical architecture and AWS resource details.
 
 ## Components
 
@@ -37,8 +37,8 @@ OpenSearch is a shared platform — both web-analytics and cf-realtime-monitor w
 
 | Repo | What it writes |
 |---|---|
-| [web-analytics](https://github.com/NASA-PDS/web-analytics) | Parsed PDS node access logs (ECS v8) |
-| [cf-realtime-monitor](https://github.com/NASA-PDS/cf-realtime-monitor) | CloudFront real-time log stream |
+| [o11y-cloudfront-batch](https://github.com/NASA-PDS/web-analytics) | Parsed PDS node access logs (ECS v8) |
+| [o11y-cloudfront-streaming](https://github.com/NASA-PDS/cf-realtime-monitor) | CloudFront real-time log stream |
 
 ## Development
 

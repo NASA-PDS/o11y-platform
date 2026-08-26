@@ -9,7 +9,7 @@ resource "aws_ssm_parameter" "opensearch_arn" {
   name        = "${local.ssm_prefix}/opensearch_arn"
   type        = "String"
   value       = aws_opensearch_domain.this.arn
-  description = "Managed OpenSearch domain ARN — consumed by web-analytics IAM policy"
+  description = "Managed OpenSearch domain ARN — consumed by o11y-cloudfront-batch IAM policy"
 }
 
 resource "aws_ssm_parameter" "opensearch_security_group_id" {

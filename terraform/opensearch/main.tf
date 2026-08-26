@@ -1,14 +1,14 @@
 data "aws_caller_identity" "current" {}
 
 # Only looked up once the consumer has actually deployed and published its role ARN —
-# see web_analytics_enabled / realtime_monitor_enabled in variables.tf.
+# see o11y_cloudfront_batch_enabled / o11y_cloudfront_streaming_enabled in variables.tf.
 data "aws_ssm_parameter" "ec2_role_arn" {
-  count = var.web_analytics_enabled ? 1 : 0
+  count = var.o11y_cloudfront_batch_enabled ? 1 : 0
   name  = "/pds/o11y-cloudfront-batch/iam/ec2_role_arn"
 }
 
 data "aws_ssm_parameter" "cloudfront_realtime_firehose_role_arn" {
-  count = var.realtime_monitor_enabled ? 1 : 0
+  count = var.o11y_cloudfront_streaming_enabled ? 1 : 0
   name  = "/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn"
 }
 
@@ -23,8 +23,8 @@ locals {
   ssm_prefix           = "/pds/o11y-platform/${local.module_relative_path}"
 
   opensearch_access_principals = concat(
-    var.web_analytics_enabled ? [data.aws_ssm_parameter.ec2_role_arn[0].value] : [],
-    var.realtime_monitor_enabled ? [data.aws_ssm_parameter.cloudfront_realtime_firehose_role_arn[0].value] : [],
+    var.o11y_cloudfront_batch_enabled ? [data.aws_ssm_parameter.ec2_role_arn[0].value] : [],
+    var.o11y_cloudfront_streaming_enabled ? [data.aws_ssm_parameter.cloudfront_realtime_firehose_role_arn[0].value] : [],
   )
 }
 
@@ -47,7 +47,7 @@ resource "aws_security_group" "opensearch" {
 
   # No inline Firehose ingress rule here — o11y-cloudfront-streaming manages its own
   # aws_vpc_security_group_ingress_rule against this SG's ID (read from SSM,
-  # see outputs.tf), so it isn't gated by realtime_monitor_enabled.
+  # see outputs.tf), so it isn't gated by o11y_cloudfront_streaming_enabled.
 
   egress {
     from_port   = 0
@@ -128,8 +128,8 @@ resource "aws_opensearch_domain" "this" {
 
 
 
-# Absent until at least one consumer is enabled (see web_analytics_enabled /
-# realtime_monitor_enabled) — an access policy with an empty Principal.AWS is invalid,
+# Absent until at least one consumer is enabled (see o11y_cloudfront_batch_enabled /
+# o11y_cloudfront_streaming_enabled) — an access policy with an empty Principal.AWS is invalid,
 # and on the initial bootstrap deploy neither consumer's role ARN exists in SSM yet.
 resource "aws_opensearch_domain_policy" "this" {
   count       = length(local.opensearch_access_principals) > 0 ? 1 : 0
