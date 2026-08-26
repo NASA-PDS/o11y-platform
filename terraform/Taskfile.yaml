@@ -1,0 +1,214 @@
+# Taskfile for pdc-observability Terraform
+# ==========================================
+#
+# Modules:
+#   opensearch/  - Shared OpenSearch domain (~15-20 min to create)
+#
+# Consumers connect via SSM:
+#   /pds/observability/opensearch/opensearch_endpoint
+#
+# Prerequisites:
+#   brew install go-task/tap/go-task
+#   Run `task auth` and follow the instructions to export SSO credentials.
+#
+# tfvars:
+#   By default, tfvars are read from a local cds-infra-deploy checkout:
+#     export CDS_INFRA_DEPLOY_DIR=/path/to/cds-infra-deploy
+#     task opensearch:plan VENUE=dev
+#   To use this repo's own (gitignored) tfvars/ dir instead — e.g. for personal
+#   iteration before promoting values to cds-infra-deploy — pass LOCAL=1:
+#     task opensearch:plan VENUE=dev LOCAL=1
+
+---
+
+version: '3'
+
+tasks:
+
+    # ------------------------------------------------------------------
+    # AWS helper
+    # ------------------------------------------------------------------
+
+    aws:
+        desc: "Verify AWS credentials are configured"
+        silent: true
+        cmds:
+            - aws sts get-caller-identity --output json
+
+    auth:
+        desc: "Export SSO credentials as env vars for Terraform (re-run when session expires)"
+        silent: true
+        cmds:
+            - |
+              echo "Run the following in your shell to authenticate Terraform:"
+              echo ""
+              echo '  eval $(aws configure export-credentials --profile <your-profile> --format env)'
+              echo ""
+              echo "Credentials are valid for ~1 hour."
+
+    # ------------------------------------------------------------------
+    # OpenSearch domain (shared platform)
+    # Can be run by Project-Power-User.
+    # ------------------------------------------------------------------
+
+    opensearch:init:
+        desc: "Initialize OpenSearch domain Terraform"
+        deps: [aws]
+        dir: opensearch
+        requires:
+            vars:
+                - name: VENUE
+                  enum: [dev, test, prod]
+        cmds:
+            - terraform init -no-color -reconfigure -backend-config=backend-{{.VENUE}}.hcl {{.CLI_ARGS}}
+
+    opensearch:validate:
+        desc: "Validate OpenSearch domain Terraform files"
+        dir: opensearch
+        cmds:
+            - terraform validate -no-color
+
+    opensearch:plan:
+        desc: "Plan OpenSearch domain changes"
+        deps: ["opensearch:init"]
+        dir: opensearch
+        requires:
+            vars:
+                - name: VENUE
+                  enum: [dev, test, prod]
+        vars:
+            TFVARS:
+                sh: |
+                    if [ "{{.LOCAL}}" = "1" ]; then
+                        echo "tfvars/{{.VENUE}}.tfvars"
+                    elif [ -n "$CDS_INFRA_DEPLOY_DIR" ]; then
+                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/observability/opensearch.tfvars"
+                    else
+                        echo "Set CDS_INFRA_DEPLOY_DIR (path to a cds-infra-deploy checkout) or pass LOCAL=1 to use this repo's local tfvars/ dir." >&2
+                        exit 1
+                    fi
+        cmds:
+            - terraform plan -var-file={{.TFVARS}} {{.CLI_ARGS}}
+
+    opensearch:deploy:
+        desc: "Deploy the OpenSearch domain (slow - allow ~15-20 min for domain creation)"
+        aliases: ["opensearch:apply"]
+        deps: ["opensearch:init"]
+        dir: opensearch
+        requires:
+            vars:
+                - name: VENUE
+                  enum: [dev, test, prod]
+        vars:
+            TFVARS:
+                sh: |
+                    if [ "{{.LOCAL}}" = "1" ]; then
+                        echo "tfvars/{{.VENUE}}.tfvars"
+                    elif [ -n "$CDS_INFRA_DEPLOY_DIR" ]; then
+                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/observability/opensearch.tfvars"
+                    else
+                        echo "Set CDS_INFRA_DEPLOY_DIR (path to a cds-infra-deploy checkout) or pass LOCAL=1 to use this repo's local tfvars/ dir." >&2
+                        exit 1
+                    fi
+        cmds:
+            - terraform apply -var-file={{.TFVARS}} {{.CLI_ARGS}}
+
+    opensearch:destroy:
+        desc: "Destroy the OpenSearch domain (destroys all indexed data)"
+        deps: ["opensearch:init"]
+        dir: opensearch
+        requires:
+            vars:
+                - name: VENUE
+                  enum: [dev, test, prod]
+        vars:
+            TFVARS:
+                sh: |
+                    if [ "{{.LOCAL}}" = "1" ]; then
+                        echo "tfvars/{{.VENUE}}.tfvars"
+                    elif [ -n "$CDS_INFRA_DEPLOY_DIR" ]; then
+                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/observability/opensearch.tfvars"
+                    else
+                        echo "Set CDS_INFRA_DEPLOY_DIR (path to a cds-infra-deploy checkout) or pass LOCAL=1 to use this repo's local tfvars/ dir." >&2
+                        exit 1
+                    fi
+        cmds:
+            - terraform apply -destroy -var-file={{.TFVARS}} {{.CLI_ARGS}}
+
+    opensearch:refresh:
+        desc: "Refresh OpenSearch module Terraform state"
+        deps: ["opensearch:init"]
+        dir: opensearch
+        requires:
+            vars:
+                - name: VENUE
+                  enum: [dev, test, prod]
+        vars:
+            TFVARS:
+                sh: |
+                    if [ "{{.LOCAL}}" = "1" ]; then
+                        echo "tfvars/{{.VENUE}}.tfvars"
+                    elif [ -n "$CDS_INFRA_DEPLOY_DIR" ]; then
+                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/observability/opensearch.tfvars"
+                    else
+                        echo "Set CDS_INFRA_DEPLOY_DIR (path to a cds-infra-deploy checkout) or pass LOCAL=1 to use this repo's local tfvars/ dir." >&2
+                        exit 1
+                    fi
+        cmds:
+            - terraform plan -refresh-only -var-file={{.TFVARS}} {{.CLI_ARGS}}
+
+    opensearch:sync:
+        desc: "Apply refresh-only to sync OpenSearch state without changing infrastructure"
+        deps: ["opensearch:init"]
+        dir: opensearch
+        requires:
+            vars:
+                - name: VENUE
+                  enum: [dev, test, prod]
+        vars:
+            TFVARS:
+                sh: |
+                    if [ "{{.LOCAL}}" = "1" ]; then
+                        echo "tfvars/{{.VENUE}}.tfvars"
+                    elif [ -n "$CDS_INFRA_DEPLOY_DIR" ]; then
+                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/observability/opensearch.tfvars"
+                    else
+                        echo "Set CDS_INFRA_DEPLOY_DIR (path to a cds-infra-deploy checkout) or pass LOCAL=1 to use this repo's local tfvars/ dir." >&2
+                        exit 1
+                    fi
+        cmds:
+            - terraform apply -refresh-only -var-file={{.TFVARS}} {{.CLI_ARGS}}
+
+    opensearch:show:
+        desc: "Show OpenSearch domain Terraform state"
+        deps: ["opensearch:init"]
+        dir: opensearch
+        requires:
+            vars:
+                - name: VENUE
+                  enum: [dev, test, prod]
+        cmds:
+            - terraform show
+
+    opensearch:endpoint:
+        desc: "Print the OpenSearch endpoint from SSM"
+        silent: true
+        cmds:
+            - |
+              aws ssm get-parameter \
+                --name /pds/observability/opensearch/opensearch_endpoint \
+                --query Parameter.Value \
+                --output text
+
+    # ------------------------------------------------------------------
+    # Default
+    # ------------------------------------------------------------------
+
+    default:
+        cmds:
+            - task --list
+        silent: true
+
+...
+
+# -*- mode: YAML; tab-width: 4 -*-

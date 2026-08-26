@@ -1,0 +1,33 @@
+name: 'Terraform Docs'
+
+on:
+  push:
+    paths: ['terraform/**']
+  pull_request:
+    paths: ['terraform/**']
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: 'terraform-docs (check)'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install terraform-docs
+        env:
+          TERRAFORM_DOCS_VERSION: v0.24.0
+        working-directory: /tmp
+        run: |
+          # Both URLs are HTTPS and the tarball is verified against the separately-fetched
+          # checksum before execution — redirect-to-HTTP risk is mitigated. NOSONAR
+          curl -sSLO "https://github.com/terraform-docs/terraform-docs/releases/download/${TERRAFORM_DOCS_VERSION}/terraform-docs-${TERRAFORM_DOCS_VERSION}-linux-amd64.tar.gz" # NOSONAR
+          curl -sSLO "https://github.com/terraform-docs/terraform-docs/releases/download/${TERRAFORM_DOCS_VERSION}/terraform-docs-${TERRAFORM_DOCS_VERSION}.sha256sum" # NOSONAR
+          sha256sum --ignore-missing -c "terraform-docs-${TERRAFORM_DOCS_VERSION}.sha256sum"
+          tar -xzf "terraform-docs-${TERRAFORM_DOCS_VERSION}-linux-amd64.tar.gz" terraform-docs
+          sudo mv terraform-docs /usr/local/bin/terraform-docs
+
+      - name: Check docs are up to date
+        working-directory: terraform
+        run: terraform-docs -c .terraform-docs.yml --recursive --recursive-path=. --recursive-include-main=false --output-check .
