@@ -37,8 +37,8 @@ OpenSearch is a shared platform — both o11y-cloudfront-batch and o11y-cloudfro
 
 | Repo | What it writes |
 |---|---|
-| [o11y-cloudfront-batch](https://github.com/NASA-PDS/web-analytics) | Parsed PDS node access logs (ECS v8) |
-| [o11y-cloudfront-streaming](https://github.com/NASA-PDS/cf-realtime-monitor) | CloudFront real-time log stream |
+| [o11y-cloudfront-batch](https://github.com/NASA-PDS/o11y-cloudfront-batch) | Parsed PDS node access logs (ECS v8) |
+| [o11y-cloudfront-streaming](https://github.com/NASA-PDS/o11y-cloudfront-streaming) | CloudFront real-time log stream |
 
 ## Development
 

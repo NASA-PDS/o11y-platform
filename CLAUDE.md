@@ -10,8 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Managed OpenSearch domain** (`terraform/opensearch/`) — VPC-only OpenSearch cluster. Both the o11y-cloudfront-batch Logstash pipeline and the o11y-cloudfront-streaming Firehose stream write to this domain. Consumers discover the endpoint via SSM.
 
 **Sub-component repos that consume this platform:**
-- [o11y-cloudfront-batch](https://github.com/NASA-PDS/web-analytics) — Logstash EC2 ingesting node access logs
-- [o11y-cloudfront-streaming](https://github.com/NASA-PDS/cf-realtime-monitor) — Kinesis Firehose ingesting CloudFront real-time logs
+- [o11y-cloudfront-batch](https://github.com/NASA-PDS/o11y-cloudfront-batch) — Logstash EC2 ingesting node access logs
+- [o11y-cloudfront-streaming](https://github.com/NASA-PDS/o11y-cloudfront-streaming) — Kinesis Firehose ingesting CloudFront real-time logs
 
 > **Note:** `src/`, `tests/`, `pyproject.toml`, `setup.cfg`, `tox.ini`, and `.pre-commit-config.yaml` are unmodified boilerplate from the [pds-template-repo-python](https://github.com/NASA-PDS/pds-template-repo-python) (package still named `your_package_name`). There is no real Python code in this repo — don't treat that scaffolding as part of the actual project.
 
