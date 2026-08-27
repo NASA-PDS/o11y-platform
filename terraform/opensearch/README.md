@@ -32,8 +32,8 @@ No modules.
 | [aws_ssm_parameter.opensearch_security_group_id](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_parameter) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_security_group.mcp_ec2](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/security_group) | data source |
-| [aws_ssm_parameter.cloudfront_realtime_firehose_role_arn](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
 | [aws_ssm_parameter.ec2_role_arn](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
+| [aws_ssm_parameter.firehose_role_arn](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
 
 ## Inputs
 
@@ -58,12 +58,12 @@ No modules.
 | <a name="input_master_node_count"></a> [master\_node\_count](#input\_master\_node\_count) | Number of dedicated master nodes | `number` | `3` | no |
 | <a name="input_master_node_instance_type"></a> [master\_node\_instance\_type](#input\_master\_node\_instance\_type) | Instance type for dedicated master nodes | `string` | `"m6g.large.search"` | no |
 | <a name="input_node_to_node_encryption"></a> [node\_to\_node\_encryption](#input\_node\_to\_node\_encryption) | Enable node-to-node encryption | `bool` | `true` | no |
-| <a name="input_partition"></a> [partition](#input\_partition) | AWS partition (aws, aws-us-gov, aws-cn) | `string` | `"aws"` | no |
+| <a name="input_o11y_cloudfront_batch_enabled"></a> [o11y\_cloudfront\_batch\_enabled](#input\_o11y\_cloudfront\_batch\_enabled) | Whether the o11y-cloudfront-batch consumer has been deployed. When true, its Logstash EC2 role ARN is read from SSM (/pds/o11y-cloudfront-batch/iam/ec2\_role\_arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before o11y-cloudfront-batch's iam/policies module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment. | `bool` | `false` | no |
 | <a name="input_o11y_cloudfront_streaming_enabled"></a> [o11y\_cloudfront\_streaming\_enabled](#input\_o11y\_cloudfront\_streaming\_enabled) | Whether the o11y-cloudfront-streaming consumer has been deployed. When true, its Firehose role ARN is read from SSM (/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before o11y-cloudfront-streaming's iam module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment. o11y-cloudfront-streaming manages its own Firehose→OpenSearch security-group ingress rule, so no SG input is needed here. | `bool` | `false` | no |
+| <a name="input_partition"></a> [partition](#input\_partition) | AWS partition (aws, aws-us-gov, aws-cn) | `string` | `"aws"` | no |
 | <a name="input_tenant"></a> [tenant](#input\_tenant) | Tag value for tenant | `string` | `"en"` | no |
 | <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | VPC ID for the OpenSearch domain security group. Required when vpc\_enabled = true. | `string` | `""` | no |
 | <a name="input_vpc_subnet_ids"></a> [vpc\_subnet\_ids](#input\_vpc\_subnet\_ids) | Subnet IDs for the OpenSearch domain VPC endpoint. One subnet per AZ. Required when vpc\_enabled = true. | `list(string)` | `[]` | no |
-| <a name="input_o11y_cloudfront_batch_enabled"></a> [o11y\_cloudfront\_batch\_enabled](#input\_o11y\_cloudfront\_batch\_enabled) | Whether the o11y-cloudfront-batch consumer has been deployed. When true, its Logstash EC2 role ARN is read from SSM (/pds/o11y-cloudfront-batch/iam/ec2\_role\_arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before o11y-cloudfront-batch's iam/policies module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment. | `bool` | `false` | no |
 | <a name="input_zone_awareness_enabled"></a> [zone\_awareness\_enabled](#input\_zone\_awareness\_enabled) | Enable zone awareness (multi-AZ). Set true for prod (3 nodes, 3 subnets), false for dev (1 node, 1 subnet). | `bool` | `false` | no |
 
 ## Outputs

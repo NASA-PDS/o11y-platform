@@ -7,7 +7,7 @@ data "aws_ssm_parameter" "ec2_role_arn" {
   name  = "/pds/o11y-cloudfront-batch/iam/ec2_role_arn"
 }
 
-data "aws_ssm_parameter" "cloudfront_realtime_firehose_role_arn" {
+data "aws_ssm_parameter" "firehose_role_arn" {
   count = var.o11y_cloudfront_streaming_enabled ? 1 : 0
   name  = "/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn"
 }
@@ -24,7 +24,7 @@ locals {
 
   opensearch_access_principals = concat(
     var.o11y_cloudfront_batch_enabled ? [data.aws_ssm_parameter.ec2_role_arn[0].value] : [],
-    var.o11y_cloudfront_streaming_enabled ? [data.aws_ssm_parameter.cloudfront_realtime_firehose_role_arn[0].value] : [],
+    var.o11y_cloudfront_streaming_enabled ? [data.aws_ssm_parameter.firehose_role_arn[0].value] : [],
   )
 }
 
