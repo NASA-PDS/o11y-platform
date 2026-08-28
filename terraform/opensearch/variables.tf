@@ -115,7 +115,7 @@ variable "o11y_cloudfront_batch_enabled" {
 
 variable "o11y_cloudfront_streaming_enabled" {
   type        = bool
-  description = "Whether the o11y-cloudfront-streaming consumer has been deployed. When true, its Firehose role ARN is read from SSM (/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before o11y-cloudfront-streaming's iam module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment. o11y-cloudfront-streaming manages its own Firehose→OpenSearch security-group ingress rule, so no SG input is needed here."
+  description = "Whether the o11y-cloudfront-streaming consumer has been deployed. When true, its Firehose role ARN is read from SSM (/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn) and added as an OpenSearch access-policy principal, and its Firehose SG ID is read from SSM (/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id) to create the Firehose→OpenSearch VPC ingress rule. Leave false for the initial bootstrap deploy (before o11y-cloudfront-streaming has published those SSM parameters), then re-apply with true once it exists — this only updates the access policy and ingress rule, no domain redeployment."
   default     = false
 }
 
@@ -145,7 +145,6 @@ variable "cicd" {
 variable "managedby" {
   type        = string
   description = "Tag value for owner managing the resource (e.g. PDS Team email distro)"
-  default     = "pdsoperator@jpl.nasa.gov"
 }
 
 variable "engine_version" {

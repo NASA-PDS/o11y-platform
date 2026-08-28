@@ -18,6 +18,11 @@ data "aws_security_group" "mcp_ec2" {
   vpc_id = var.vpc_id
 }
 
+data "aws_ssm_parameter" "firehose_security_group_id" {
+  count = var.o11y_cloudfront_streaming_enabled ? 1 : 0
+  name  = "/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id"
+}
+
 locals {
   module_relative_path = replace(abspath(path.module), "/^.*\\/terraform\\//", "")
   ssm_prefix           = "/pds/o11y-platform/${local.module_relative_path}"
@@ -29,25 +34,13 @@ locals {
 }
 
 # Security group for the OpenSearch domain VPC endpoint.
-# Allows HTTPS inbound only from the Logstash EC2 security group.
-# Only created when vpc_enabled = true.
+# Ingress rules are managed as separate aws_vpc_security_group_ingress_rule resources
+# to avoid mixing inline and standalone rules. Only created when vpc_enabled = true.
 resource "aws_security_group" "opensearch" {
   count       = var.vpc_enabled ? 1 : 0
   name        = "${var.domain_name}-opensearch-sg"
-  description = "OpenSearch domain VPC endpoint - HTTPS inbound from Logstash EC2 only"
+  description = "OpenSearch domain VPC endpoint - HTTPS inbound only"
   vpc_id      = var.vpc_id
-
-  ingress {
-    description     = "HTTPS from Logstash EC2"
-    from_port       = 443
-    to_port         = 443
-    protocol        = "tcp"
-    security_groups = [data.aws_security_group.mcp_ec2[0].id]
-  }
-
-  # No inline Firehose ingress rule here — o11y-cloudfront-streaming manages its own
-  # aws_vpc_security_group_ingress_rule against this SG's ID (read from SSM,
-  # see outputs.tf), so it isn't gated by o11y_cloudfront_streaming_enabled.
 
   egress {
     from_port   = 0
@@ -65,7 +58,31 @@ resource "aws_security_group" "opensearch" {
   }
 }
 
-resource "aws_opensearch_domain" "this" {
+resource "aws_vpc_security_group_ingress_rule" "opensearch_https_from_ec2" {
+  count                        = var.vpc_enabled ? 1 : 0
+  security_group_id            = aws_security_group.opensearch[0].id
+  referenced_security_group_id = data.aws_security_group.mcp_ec2[0].id
+
+  from_port   = 443
+  to_port     = 443
+  ip_protocol = "tcp"
+
+  description = "Allow HTTPS from the Logstash EC2 security group."
+}
+
+resource "aws_vpc_security_group_ingress_rule" "opensearch_https_from_firehose" {
+  count                        = var.vpc_enabled && var.o11y_cloudfront_streaming_enabled ? 1 : 0
+  security_group_id            = aws_security_group.opensearch[0].id
+  referenced_security_group_id = data.aws_ssm_parameter.firehose_security_group_id[0].value
+
+  from_port   = 443
+  to_port     = 443
+  ip_protocol = "tcp"
+
+  description = "Allow HTTPS from the o11y-cloudfront-streaming Firehose security group."
+}
+
+resource "aws_opensearch_domain" "this" { #NOSONAR
   domain_name    = var.domain_name
   engine_version = var.engine_version
 
@@ -108,9 +125,9 @@ resource "aws_opensearch_domain" "this" {
   # Fine-grained access control (FGAC) is intentionally disabled: access is restricted
   # to known IAM role ARNs via resource policy on a VPC-only domain, which is sufficient
   # for this use case. AUDIT_LOGS require FGAC to be enabled, so that log type is
-  # unavailable here by design. #NOSONAR
+  # unavailable here by design.
   advanced_security_options {
-    enabled = false #NOSONAR
+    enabled = false
   }
 
   dynamic "vpc_options" {
