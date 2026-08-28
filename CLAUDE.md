@@ -13,6 +13,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - [o11y-cloudfront-batch](https://github.com/NASA-PDS/o11y-cloudfront-batch) — Logstash EC2 ingesting node access logs
 - [o11y-cloudfront-streaming](https://github.com/NASA-PDS/o11y-cloudfront-streaming) — Kinesis Firehose ingesting CloudFront real-time logs
 
+**Shared infrastructure dependency — pdc-cds-infra:**
+
+This repo depends on [pdc-cds-infra](https://github.com/NASA-PDS/pdc-cds-infra) (checked out at `/Users/jpadams/proj/pds/pdsen/workspace/pdc-cds-infra` locally). It is the shared infra layer for the entire PDS CDS ecosystem, deployed in the same AWS account and region. It owns the Cognito User Pool, Identity Pools, and IAM roles that all PDS services share. **Do not create new Cognito resources here** — read them from SSM.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          pdc-cds-infra                                      │
+│  Cognito User Pool ──► Identity Pool (opensearch-dashboards)                │
+│  IAM roles: pds_cds_admin_through_cognito, pds_readonly_through_cognito     │
+│  SSM outputs: /pds/cds-infra/cognito/user-pool/user-pool-id                 │
+│               /pds/cds-infra/cognito/user-pool/opensearch-dashboards-*      │
+│               /pds/cds-infra/iam/roles/cognito-admin-role-arn               │
+└──────────────────────────────────┬──────────────────────────────────────────┘
+                                   │ reads via SSM (dashboards_enabled = true)
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          o11y-platform (this repo)                          │
+│  OpenSearch domain (VPC-only)                                               │
+│  cognito_options → Dashboards UI with Cognito login                         │
+│  SSM outputs: /pds/o11y-platform/opensearch/opensearch_endpoint             │
+│               /pds/o11y-platform/opensearch/opensearch_arn                  │
+│               /pds/o11y-platform/opensearch/opensearch_security_group_id    │
+└────────────┬──────────────────────────────┬────────────────────────────────┘
+             │ reads endpoint/ARN via SSM   │ reads endpoint/SG ID via SSM
+             ▼                              ▼
+┌────────────────────────┐    ┌─────────────────────────────┐
+│  o11y-cloudfront-batch │    │  o11y-cloudfront-streaming  │
+│  Logstash EC2          │    │  Kinesis Firehose           │
+│  (writes logs)         │    │  (writes logs)              │
+└────────────────────────┘    └─────────────────────────────┘
+```
+
 > **Note:** `src/`, `tests/`, `pyproject.toml`, `setup.cfg`, `tox.ini`, and `.pre-commit-config.yaml` are unmodified boilerplate from the [pds-template-repo-python](https://github.com/NASA-PDS/pds-template-repo-python) (package still named `your_package_name`). There is no real Python code in this repo — don't treat that scaffolding as part of the actual project.
 
 ## Terraform
@@ -54,7 +86,8 @@ terraform/
 cd terraform/
 cp opensearch/tfvars/dev.tfvars.example opensearch/tfvars/dev.tfvars
 # Edit dev.tfvars: set domain_name, vpc_id, vpc_subnet_ids, ec2_security_group_name
-# Leave o11y_cloudfront_batch_enabled / o11y_cloudfront_streaming_enabled at their default (false) for a first deploy
+# Leave o11y_cloudfront_batch_enabled / o11y_cloudfront_streaming_enabled / dashboards_enabled
+# at their default (false) for a first deploy — see Key design decisions for the flip sequence
 ```
 
 ### Deployment commands
@@ -85,6 +118,7 @@ CI (`.github/workflows/terraform_cicd.yaml`) currently only runs `terraform fmt`
 - **`lifecycle { ignore_changes = [tags] }`** on the OpenSearch SG — suppresses drift from AWS Config auto-tagging.
 - **State** — S3 backend, key `o11y-platform/opensearch.tfstate`, bucket/region per-venue in `backend-<venue>.hcl`.
 - **dev vs prod sizing** — dev uses single-node, no dedicated masters, no zone awareness (`t3.medium.search`); prod-like venues should enable `dedicated_master_enabled` and `zone_awareness_enabled` with matching subnet/AZ counts.
+- **OpenSearch Dashboards via Cognito (`dashboards_enabled`)** — when `true`, enables FGAC on the domain and attaches `cognito_options` pointing at the User Pool and Identity Pool provisioned by `pdc-cds-infra`. An `es.amazonaws.com` IAM service role (`${domain_name}-opensearch-cognito`) with `AmazonOpenSearchServiceCognitoAccess` is created here; it must exist before `cognito_options` can be applied. The Cognito app client and Identity Pool (`opensearch-dashboards`) live in `pdc-cds-infra/terraform/cognito/user-pool/` and must be deployed first, with `opensearch_dashboards_callback_urls` set to the domain's Dashboards endpoint URL. Enabling FGAC is **irreversible** — once on, it cannot be turned off without destroying and recreating the domain. Leave `false` for initial bootstrap; flip and re-apply once pdc-cds-infra Cognito resources exist. This triggers a domain configuration update (~10 min), not a replacement.
 
 ### Adding a new consumer
 
