@@ -34,21 +34,13 @@ locals {
 }
 
 # Security group for the OpenSearch domain VPC endpoint.
-# Allows HTTPS inbound only from the Logstash EC2 security group.
-# Only created when vpc_enabled = true.
+# Ingress rules are managed as separate aws_vpc_security_group_ingress_rule resources
+# to avoid mixing inline and standalone rules. Only created when vpc_enabled = true.
 resource "aws_security_group" "opensearch" {
   count       = var.vpc_enabled ? 1 : 0
   name        = "${var.domain_name}-opensearch-sg"
-  description = "OpenSearch domain VPC endpoint - HTTPS inbound from Logstash EC2 only"
+  description = "OpenSearch domain VPC endpoint - HTTPS inbound only"
   vpc_id      = var.vpc_id
-
-  ingress {
-    description     = "HTTPS from Logstash EC2"
-    from_port       = 443
-    to_port         = 443
-    protocol        = "tcp"
-    security_groups = [data.aws_security_group.mcp_ec2[0].id]
-  }
 
   egress {
     from_port   = 0
@@ -66,8 +58,20 @@ resource "aws_security_group" "opensearch" {
   }
 }
 
+resource "aws_vpc_security_group_ingress_rule" "opensearch_https_from_ec2" {
+  count                        = var.vpc_enabled ? 1 : 0
+  security_group_id            = aws_security_group.opensearch[0].id
+  referenced_security_group_id = data.aws_security_group.mcp_ec2[0].id
+
+  from_port   = 443
+  to_port     = 443
+  ip_protocol = "tcp"
+
+  description = "Allow HTTPS from the Logstash EC2 security group."
+}
+
 resource "aws_vpc_security_group_ingress_rule" "opensearch_https_from_firehose" {
-  count                        = var.realtime_monitor_enabled ? 1 : 0
+  count                        = var.vpc_enabled && var.realtime_monitor_enabled ? 1 : 0
   security_group_id            = aws_security_group.opensearch[0].id
   referenced_security_group_id = data.aws_ssm_parameter.firehose_security_group_id[0].value
 
