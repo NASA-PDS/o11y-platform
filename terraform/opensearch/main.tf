@@ -1,15 +1,15 @@
 data "aws_caller_identity" "current" {}
 
 # Only looked up once the consumer has actually deployed and published its role ARN —
-# see web_analytics_enabled / realtime_monitor_enabled in variables.tf.
+# see o11y_cloudfront_batch_enabled / o11y_cloudfront_streaming_enabled in variables.tf.
 data "aws_ssm_parameter" "ec2_role_arn" {
-  count = var.web_analytics_enabled ? 1 : 0
-  name  = "/pds/web-analytics/iam/ec2_role_arn"
+  count = var.o11y_cloudfront_batch_enabled ? 1 : 0
+  name  = "/pds/o11y-cloudfront-batch/iam/ec2_role_arn"
 }
 
-data "aws_ssm_parameter" "cloudfront_realtime_firehose_role_arn" {
-  count = var.realtime_monitor_enabled ? 1 : 0
-  name  = "/pds/monitor/firehose/firehose-role-arn"
+data "aws_ssm_parameter" "firehose_role_arn" {
+  count = var.o11y_cloudfront_streaming_enabled ? 1 : 0
+  name  = "/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn"
 }
 
 data "aws_security_group" "mcp_ec2" {
@@ -18,36 +18,29 @@ data "aws_security_group" "mcp_ec2" {
   vpc_id = var.vpc_id
 }
 
+data "aws_ssm_parameter" "firehose_security_group_id" {
+  count = var.o11y_cloudfront_streaming_enabled ? 1 : 0
+  name  = "/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id"
+}
+
 locals {
   module_relative_path = replace(abspath(path.module), "/^.*\\/terraform\\//", "")
-  ssm_prefix           = "/pds/observability/${local.module_relative_path}"
+  ssm_prefix           = "/pds/o11y-platform/${local.module_relative_path}"
 
   opensearch_access_principals = concat(
-    var.web_analytics_enabled ? [data.aws_ssm_parameter.ec2_role_arn[0].value] : [],
-    var.realtime_monitor_enabled ? [data.aws_ssm_parameter.cloudfront_realtime_firehose_role_arn[0].value] : [],
+    var.o11y_cloudfront_batch_enabled ? [data.aws_ssm_parameter.ec2_role_arn[0].value] : [],
+    var.o11y_cloudfront_streaming_enabled ? [data.aws_ssm_parameter.firehose_role_arn[0].value] : [],
   )
 }
 
 # Security group for the OpenSearch domain VPC endpoint.
-# Allows HTTPS inbound only from the Logstash EC2 security group.
-# Only created when vpc_enabled = true.
+# Ingress rules are managed as separate aws_vpc_security_group_ingress_rule resources
+# to avoid mixing inline and standalone rules. Only created when vpc_enabled = true.
 resource "aws_security_group" "opensearch" {
   count       = var.vpc_enabled ? 1 : 0
   name        = "${var.domain_name}-opensearch-sg"
-  description = "OpenSearch domain VPC endpoint - HTTPS inbound from Logstash EC2 only"
+  description = "OpenSearch domain VPC endpoint - HTTPS inbound only"
   vpc_id      = var.vpc_id
-
-  ingress {
-    description     = "HTTPS from Logstash EC2"
-    from_port       = 443
-    to_port         = 443
-    protocol        = "tcp"
-    security_groups = [data.aws_security_group.mcp_ec2[0].id]
-  }
-
-  # No inline Firehose ingress rule here — cf-realtime-monitor manages its own
-  # aws_vpc_security_group_ingress_rule against this SG's ID (read from SSM,
-  # see outputs.tf), so it isn't gated by realtime_monitor_enabled.
 
   egress {
     from_port   = 0
@@ -63,6 +56,30 @@ resource "aws_security_group" "opensearch" {
   lifecycle {
     ignore_changes = [tags]
   }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "opensearch_https_from_ec2" {
+  count                        = var.vpc_enabled ? 1 : 0
+  security_group_id            = aws_security_group.opensearch[0].id
+  referenced_security_group_id = data.aws_security_group.mcp_ec2[0].id
+
+  from_port   = 443
+  to_port     = 443
+  ip_protocol = "tcp"
+
+  description = "Allow HTTPS from the Logstash EC2 security group."
+}
+
+resource "aws_vpc_security_group_ingress_rule" "opensearch_https_from_firehose" {
+  count                        = var.vpc_enabled && var.o11y_cloudfront_streaming_enabled ? 1 : 0
+  security_group_id            = aws_security_group.opensearch[0].id
+  referenced_security_group_id = data.aws_ssm_parameter.firehose_security_group_id[0].value
+
+  from_port   = 443
+  to_port     = 443
+  ip_protocol = "tcp"
+
+  description = "Allow HTTPS from the o11y-cloudfront-streaming Firehose security group."
 }
 
 resource "aws_opensearch_domain" "this" { #NOSONAR
@@ -128,8 +145,8 @@ resource "aws_opensearch_domain" "this" { #NOSONAR
 
 
 
-# Absent until at least one consumer is enabled (see web_analytics_enabled /
-# realtime_monitor_enabled) — an access policy with an empty Principal.AWS is invalid,
+# Absent until at least one consumer is enabled (see o11y_cloudfront_batch_enabled /
+# o11y_cloudfront_streaming_enabled) — an access policy with an empty Principal.AWS is invalid,
 # and on the initial bootstrap deploy neither consumer's role ARN exists in SSM yet.
 resource "aws_opensearch_domain_policy" "this" {
   count       = length(local.opensearch_access_principals) > 0 ? 1 : 0

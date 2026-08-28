@@ -24,7 +24,7 @@ ec2_security_group_name  = ""   # Name of the MCP EC2 security group
 # Leave both false for the initial bootstrap deploy — flip to true and re-apply
 # (access-policy update only, no domain redeployment) once each consumer has
 # deployed and published its role ARN to SSM. See terraform/README.md#deployment-flow.
-web_analytics_enabled    = false
-realtime_monitor_enabled = false
+o11y_cloudfront_batch_enabled     = false
+o11y_cloudfront_streaming_enabled = false
 
 engine_version = "OpenSearch_2.19"
