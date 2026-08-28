@@ -1,14 +1,14 @@
 data "aws_caller_identity" "current" {}
 
 # Only looked up once the consumer has actually deployed and published its role ARN —
-# see web_analytics_enabled / realtime_monitor_enabled in variables.tf.
+# see o11y_cloudfront_batch_enabled / o11y_cloudfront_streaming_enabled in variables.tf.
 data "aws_ssm_parameter" "ec2_role_arn" {
-  count = var.web_analytics_enabled ? 1 : 0
-  name  = "/pds/web-analytics/iam/ec2_role_arn"
+  count = var.o11y_cloudfront_batch_enabled ? 1 : 0
+  name  = "/pds/o11y-cloudfront-batch/iam/ec2_role_arn"
 }
 
-data "aws_ssm_parameter" "cloudfront_realtime_firehose_role_arn" {
-  count = var.realtime_monitor_enabled ? 1 : 0
+data "aws_ssm_parameter" "firehose_role_arn" {
+  count = var.o11y_cloudfront_streaming_enabled ? 1 : 0
   name  = "/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn"
 }
 
@@ -19,17 +19,17 @@ data "aws_security_group" "mcp_ec2" {
 }
 
 data "aws_ssm_parameter" "firehose_security_group_id" {
-  count = var.realtime_monitor_enabled ? 1 : 0
+  count = var.o11y_cloudfront_streaming_enabled ? 1 : 0
   name  = "/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id"
 }
 
 locals {
   module_relative_path = replace(abspath(path.module), "/^.*\\/terraform\\//", "")
-  ssm_prefix           = "/pds/observability/${local.module_relative_path}"
+  ssm_prefix           = "/pds/o11y-platform/${local.module_relative_path}"
 
   opensearch_access_principals = concat(
-    var.web_analytics_enabled ? [data.aws_ssm_parameter.ec2_role_arn[0].value] : [],
-    var.realtime_monitor_enabled ? [data.aws_ssm_parameter.cloudfront_realtime_firehose_role_arn[0].value] : [],
+    var.o11y_cloudfront_batch_enabled ? [data.aws_ssm_parameter.ec2_role_arn[0].value] : [],
+    var.o11y_cloudfront_streaming_enabled ? [data.aws_ssm_parameter.firehose_role_arn[0].value] : [],
   )
 }
 
@@ -71,7 +71,7 @@ resource "aws_vpc_security_group_ingress_rule" "opensearch_https_from_ec2" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "opensearch_https_from_firehose" {
-  count                        = var.vpc_enabled && var.realtime_monitor_enabled ? 1 : 0
+  count                        = var.vpc_enabled && var.o11y_cloudfront_streaming_enabled ? 1 : 0
   security_group_id            = aws_security_group.opensearch[0].id
   referenced_security_group_id = data.aws_ssm_parameter.firehose_security_group_id[0].value
 
@@ -145,8 +145,8 @@ resource "aws_opensearch_domain" "this" { #NOSONAR
 
 
 
-# Absent until at least one consumer is enabled (see web_analytics_enabled /
-# realtime_monitor_enabled) — an access policy with an empty Principal.AWS is invalid,
+# Absent until at least one consumer is enabled (see o11y_cloudfront_batch_enabled /
+# o11y_cloudfront_streaming_enabled) — an access policy with an empty Principal.AWS is invalid,
 # and on the initial bootstrap deploy neither consumer's role ARN exists in SSM yet.
 resource "aws_opensearch_domain_policy" "this" {
   count       = length(local.opensearch_access_principals) > 0 ? 1 : 0
