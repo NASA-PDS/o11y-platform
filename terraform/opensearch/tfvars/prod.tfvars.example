@@ -21,10 +21,16 @@ vpc_id                   = ""
 vpc_subnet_ids           = []   # Provide one subnet per AZ (3 AZs for zone awareness)
 ec2_security_group_name  = ""   # Name of the MCP EC2 security group
 
-# Leave both false for the initial bootstrap deploy — flip to true and re-apply
-# (access-policy update only, no domain redeployment) once each consumer has
-# deployed and published its role ARN to SSM. See terraform/README.md#deployment-flow.
+# Leave all three false for the initial bootstrap deploy.
+# o11y_cloudfront_*: flip to true once each consumer has deployed and published its role ARN to SSM
+#   (access-policy update only, no domain redeployment). See terraform/README.md#deployment-flow.
+# dashboards_enabled: flip to true once pdc-cds-infra cognito/user-pool has been deployed with
+#   opensearch_dashboards_callback_urls pointing at this domain's endpoint (triggers a domain
+#   configuration update — not a replacement, but takes ~10 min to apply).
+#   WARNING: enabling FGAC (required by dashboards_enabled) is irreversible — the domain must be
+#   destroyed and recreated to disable it. Only flip this once you intend it permanently.
 o11y_cloudfront_batch_enabled     = false
 o11y_cloudfront_streaming_enabled = false
+dashboards_enabled                = false
 
 engine_version = "OpenSearch_2.19"
