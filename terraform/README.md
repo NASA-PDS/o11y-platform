@@ -74,9 +74,10 @@ flowchart TD
     end
 
     subgraph p2a["Phase 2a — o11y-cloudfront-batch (parallel with 2b/2c)"]
-        BIAM["iam/policies\npublishes ec2_role_arn → SSM"]
-        BS3["s3\ncreates pds-dev-gh01dc-web-analytics bucket\n(Logstash node access logs)\npublishes bucket name → SSM"]
-        BIAM --> BS3
+        BIAM["iam/policies"]
+        BS3["s3\ncreates pds-dev-gh01dc-web-analytics bucket"]
+        BLS["logstash\npublishes ec2_role_arn + bucket name → SSM"]
+        BIAM --> BS3 --> BLS
     end
 
     subgraph p2b["Phase 2b — o11y-cloudfront-streaming IAM (parallel with 2a/2c)"]
@@ -98,33 +99,27 @@ flowchart TD
         OS2["opensearch re-apply\no11y_cloudfront_batch_enabled=true\no11y_cloudfront_streaming_enabled=true\ndashboards_enabled=true\n(~10 min for FGAC + cognito_options)"]
     end
 
-    subgraph p5["Phase 5 — o11y-cloudfront-batch logstash"]
-        LS["logstash EC2\nreads pds-dev-gh01dc-web-analytics + OpenSearch endpoint from SSM"]
-    end
 
     OS1 -->|"endpoint, arn, SG id → SSM"| p2a
     OS1 -->|"endpoint, SG id → SSM"| p2b
     OS1 -->|"endpoint → SSM"| p2c
-    BIAM -->|"ec2_role_arn → SSM"| CF
+    BLS -->|"ec2_role_arn → SSM"| CF
     CFIAM -->|"kinesis_stream_arn → SSM"| CF
     IAMROLES -->|"cognito role ARNs → SSM"| OS2
     CDS -->|"identity-pool-id → SSM"| OS2
     CFIAM -->|"firehose_role_arn → SSM"| OS2
-    BIAM -->|"ec2_role_arn → SSM"| OS2
+    BLS -->|"ec2_role_arn → SSM"| OS2
     CF -->|"CloudFront now writing to Kinesis"| CFMAIN
     CFMAIN --> OS2
-    OS2 -->|"access policy now allows all"| LS
-    BS3 -->|"bucket name → SSM"| LS
 ```
 
 1. **(1) Bootstrap OpenSearch** — `task opensearch:deploy VENUE=dev` with all `*_enabled = false` (~15-20 min). Publishes endpoint, ARN, and SG ID to SSM. No Cognito or consumer dependencies at this phase.
 2. **(2a/2b/2c) Deploy in parallel** — all three can start immediately after Phase 1:
-   - **(2a) o11y-cloudfront-batch** `iam/policies` then `s3` — `iam` publishes `ec2_role_arn`; `s3` creates the **`pds-dev-gh01dc-web-analytics`** bucket (where Logstash reads PDS node access logs) and sets its bucket policy
+   - **(2a) o11y-cloudfront-batch** `iam/policies` → `s3` → `logstash` — `s3` creates the **`pds-dev-gh01dc-web-analytics`** bucket; `logstash` deploys the EC2 instance and publishes `ec2_role_arn` and the bucket name to SSM. Logstash will idle until CloudFront starts writing logs in Phase 3.
    - **(2b) o11y-cloudfront-streaming** `iam` only — publishes `firehose_role_arn` and `kinesis_stream_arn` to SSM. The Firehose also backs up to the pre-existing **`pds-logs-dev`** bucket (managed by pdc-cds-infra, not created here). Stop here — don't deploy the root module yet.
    - **(2c) pdc-cds-infra `cognito/user-pool`** with `o11y_opensearch_dashboards_enabled = true` — the endpoint is now in SSM, so it reads it, constructs the callback URL, creates the Identity Pool, and publishes its ID to SSM. Then deploy `iam/roles` (publishes Cognito role ARNs to SSM).
 3. **(3) pdc-cds-infra CloudFront** — deploy `cloudfront/pds-main` with `enable_o11y_batch = true` and `enable_realtime_logging = true`. Reads `ec2_role_arn` and `kinesis_stream_arn` from SSM. After this, CloudFront writes access logs to **`pds-logs-dev`** and real-time logs to the Kinesis stream.
 4. **(4) o11y-cloudfront-streaming root + grant OpenSearch access** — deploy the o11y-cloudfront-streaming root module (Firehose reads from Kinesis → OpenSearch, backs up to `pds-logs-dev`). Then re-apply this repo with `o11y_cloudfront_batch_enabled = true`, `o11y_cloudfront_streaming_enabled = true`, and `dashboards_enabled = true`. Consumer flags are access-policy-only (seconds); `dashboards_enabled` also wires `cognito_options` (~10 min). **⚠ Enabling FGAC is irreversible.**
-5. **(5) o11y-cloudfront-batch logstash** — `task logstash:deploy VENUE=dev` — reads OpenSearch endpoint and `pds-dev-gh01dc-web-analytics` bucket name from SSM.
 
 **Two log buckets:**
 - **`pds-logs-dev`** — pre-existing, managed by pdc-cds-infra. Receives CloudFront standard access logs and Firehose S3 backups.
