@@ -264,6 +264,140 @@ Users are managed in pdc-cds-infra `terraform/cognito/user-and-groups/`. The Cog
 
 ---
 
+## OpenSearch UI Application
+
+The **OpenSearch UI Application** is a separately AWS-hosted web UI — distinct from the built-in `/_dashboards` endpoint. It connects to the VPC-only domain without requiring a public endpoint, supports multiple data sources and workspaces, and is the AWS-recommended path for authenticated ops access going forward.
+
+> **No Terraform resource exists yet** — `aws_opensearch_application` is tracked in [hashicorp/terraform-provider-aws#45082](https://github.com/hashicorp/terraform-provider-aws/issues/45082). The steps below are manual (console + CLI). The VPC authorization step (one CLI call) can optionally be added as a `null_resource` local-exec in the `opensearch/` module once the pattern is stable.
+
+### Auth options
+
+Two authentication modes are supported. Choose one when creating the application:
+
+| Mode | When to use | Requirements |
+|---|---|---|
+| **IAM auth** (default) | Ops personnel already have IAM roles; access via AWS console | No additional setup — IAM role ARNs are granted directly |
+| **IAM Identity Center** | SSO login without requiring AWS console access; broader audience | IAM Identity Center must be enabled in the account/org first |
+
+### Prerequisites
+
+Complete [Phase 1 (OpenSearch bootstrap)](#opensearch-domain-bootstrap----power-user-15-20-min) so the domain exists. No `dashboards_enabled` or Cognito setup is required for the OpenSearch UI Application.
+
+### Step 1 — Authorize VPC access (CLI) — 🔑 Platform Engineer
+
+After the domain exists, authorize the OpenSearch UI service to reach it through the VPC:
+
+```bash
+aws opensearch authorize-vpc-endpoint-access \
+  --domain-name <domain-name> \
+  --service application.opensearchservice.amazonaws.com \
+  --region us-west-2
+```
+
+This is a one-time authorization per domain. To verify:
+
+```bash
+aws opensearch list-vpc-endpoint-access \
+  --domain-name <domain-name> \
+  --region us-west-2
+```
+
+### Step 2 — Create the application (console)
+
+1. Open **Amazon OpenSearch Service → OpenSearch UI (Dashboards) → Create application**
+2. Enter an **Application name** (e.g., `pds-dev-o11y-ui`)
+3. Choose your auth mode:
+
+**IAM auth (no Identity Center):**
+- Leave the **Authentication with IAM Identity Center** box unchecked
+- Under **OpenSearch application admins**, choose **Grant administrator's permission to specific user(s)**
+- Select **IAM users** or pick the IAM role ARN(s) for your ops SSO roles
+- Choose **Create**
+
+**IAM Identity Center (SSO):**
+- Check **Authentication with IAM Identity Center**
+- If IDC is already enabled, the existing instance is detected automatically
+- If not, create an account instance via the prompt (for testing) or request an org instance
+- Create or select an **IAM role for Identity Center application** (see trust policy below)
+- Add admin users/groups from your IDC directory
+- Choose **Create**
+
+**IAM role trust policy required for IAM Identity Center auth:**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": { "Service": "application.opensearchservice.amazonaws.com" },
+      "Action": "sts:AssumeRole"
+    },
+    {
+      "Effect": "Allow",
+      "Principal": { "Service": "application.opensearchservice.amazonaws.com" },
+      "Action": "sts:SetContext",
+      "Condition": {
+        "ForAllValues:ArnEquals": {
+          "sts:RequestContextProviders": "arn:aws:iam::aws:contextProvider/IdentityCenter"
+        }
+      }
+    }
+  ]
+}
+```
+
+**Permission policy for the same role:**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "identitystore:DescribeUser",
+        "identitystore:ListGroupMembershipsForMember",
+        "identitystore:DescribeGroup"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "ForAnyValue:StringEquals": {
+          "aws:CalledViaLast": "es.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["es:ESHttp*"],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+### Step 3 — Associate the OpenSearch domain
+
+1. On the application detail page, choose **Manage data sources**
+2. Select the `pds-<venue>-o11y` domain
+3. Choose **Next → Save**
+
+The **Launch Application** button activates once at least one data source is associated.
+
+### Step 4 — Grant domain access to ops roles (IAM auth only)
+
+If using IAM auth (no Identity Center), the application passes the caller's IAM identity to the domain. Each IAM role that needs access must be granted in the OpenSearch FGAC backend. If `dashboards_enabled = false` (FGAC not yet enabled), add an explicit IAM access policy entry for each ops role ARN in `opensearch/main.tf` (same `local.opensearch_access_principals` pattern used by the consumer flags), or enable FGAC and manage roles via the Fine-Grained Access Control UI.
+
+For IAM Identity Center auth, user→role mapping is handled by IDC groups — no per-domain FGAC config needed.
+
+### Access tier summary
+
+| Step | Tier | Reason |
+|---|---|---|
+| VPC authorization (CLI) | 🔑 Platform Engineer | `es:AuthorizeVpcEndpointAccess` |
+| Create application (console) | 👤 Power User | `es:CreateApplication`, `sso:*` (if IDC) |
+| Associate data source | 👤 Power User | `es:UpdateApplication` |
+
+---
+
 ## Teardown
 
 ```bash
