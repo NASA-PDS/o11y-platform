@@ -69,54 +69,73 @@ Network access is controlled by Security Group ingress rules (port 443). The EC2
 
 ```mermaid
 flowchart TD
-    subgraph p1["Phase 1 — bootstrap (this repo)"]
+    subgraph p1["Phase 1 — pdc-cds-infra prerequisites"]
+        COGPOOL["cognito/user-pool\n(creates User Pool, IAM roles)\no11y_opensearch_dashboards_enabled=false initially"]
+        IAMROLES["iam/roles\n(publishes cognito role ARNs → SSM)"]
+        COGPOOL --> IAMROLES
+    end
+
+    subgraph p2["Phase 2 — bootstrap OpenSearch (this repo)"]
         OS1["opensearch\nall *_enabled = false\n(~15-20 min)\npublishes endpoint → SSM"]
     end
 
-    subgraph p2["Phase 2 — pdc-cds-infra (if Dashboards needed)"]
-        CDS["cognito/user-pool\no11y_opensearch_dashboards_enabled = true\n(reads endpoint from SSM automatically,\npublishes identity-pool-id → SSM)"]
+    subgraph p3a["Phase 3a — o11y-cloudfront-batch (parallel with 3b/3c)"]
+        BIAM["iam/policies\npublishes ec2_role_arn → SSM"]
+        BS3["s3\ncreates pds-dev-gh01dc-web-analytics bucket\n(Logstash node access logs)\npublishes bucket name → SSM"]
+        BIAM --> BS3
     end
 
-    subgraph p2wa["Phase 2 — o11y-cloudfront-batch (parallel)"]
-        IAM["iam/policies"]
-        S3["S3 bucket"]
+    subgraph p3b["Phase 3b — o11y-cloudfront-streaming IAM (parallel with 3a/3c)"]
+        CFIAM["iam/\npublishes firehose_role_arn,\nkinesis_stream_arn → SSM\n(Firehose also backs up to pre-existing pds-logs-dev bucket)"]
     end
 
-    subgraph p2cf["Phase 2 — o11y-cloudfront-streaming (parallel)"]
-        CFIAM["iam/ (own state, deploy first)"]
-        CFMAIN["terraform apply\n(firehose, kinesis, lambda, CloudFront)"]
-        CFIAM --> CFMAIN
+    subgraph p3c["Phase 3c — pdc-cds-infra Cognito re-apply (parallel, if Dashboards needed)"]
+        CDS["cognito/user-pool\no11y_opensearch_dashboards_enabled=true\nreads OpenSearch endpoint from SSM,\npublishes identity-pool-id → SSM"]
     end
 
-    subgraph p3["Phase 3 — grant access + Dashboards (this repo)"]
-        OS2["opensearch\no11y_cloudfront_batch_enabled = true\no11y_cloudfront_streaming_enabled = true\ndashboards_enabled = true\n(reads identity-pool-id from SSM,\nenables FGAC + cognito_options, ~10 min)"]
+    subgraph p4["Phase 4 — pdc-cds-infra CloudFront"]
+        CF["cloudfront/pds-main\nenable_o11y_batch=true\nenable_realtime_logging=true\n(reads kinesis_stream_arn from SSM,\nwrites access logs → pds-logs-dev,\nwrites realtime logs → Kinesis stream)"]
     end
 
-    subgraph p4["Phase 4 — o11y-cloudfront-batch"]
-        LS["logstash EC2"]
+    subgraph p5["Phase 5 — o11y-cloudfront-streaming root + grant access (this repo)"]
+        CFMAIN["o11y-cloudfront-streaming root\nfirehose + kinesis + lambda\n(Firehose: Kinesis → OpenSearch, backup → pds-logs-dev)"]
+        OS2["opensearch re-apply\no11y_cloudfront_batch_enabled=true\no11y_cloudfront_streaming_enabled=true\ndashboards_enabled=true\n(~10 min if dashboards_enabled)"]
     end
 
-    OS1 -->|"endpoint → SSM"| CDS
-    OS1 -->|"endpoint, arn, SG id → SSM"| p2wa
-    OS1 -->|"endpoint, SG id → SSM"| p2cf
+    subgraph p6["Phase 6 — o11y-cloudfront-batch logstash"]
+        LS["logstash EC2\nreads pds-dev-gh01dc-web-analytics + OpenSearch endpoint from SSM"]
+    end
+
+    IAMROLES -->|"cognito role ARNs → SSM"| OS1
+    OS1 -->|"endpoint, arn, SG id → SSM"| p3a
+    OS1 -->|"endpoint, SG id → SSM"| p3b
+    OS1 -->|"endpoint → SSM"| p3c
+    BIAM -->|"ec2_role_arn → SSM"| CF
+    CFIAM -->|"kinesis_stream_arn → SSM"| CF
     CDS -->|"identity-pool-id → SSM"| OS2
-    IAM -->|"ec2_role_arn → SSM"| OS2
     CFIAM -->|"firehose_role_arn → SSM"| OS2
+    BIAM -->|"ec2_role_arn → SSM"| OS2
+    CF -->|"CloudFront now writing to Kinesis"| CFMAIN
+    CFMAIN --> OS2
     OS2 -->|"access policy now allows all"| LS
-    OS2 -->|"access policy now allows all"| CFMAIN
-    IAM --> LS
-    S3 -->|"bucket → SSM"| LS
+    BS3 -->|"bucket name → SSM"| LS
 ```
 
-1. **(1) Bootstrap OpenSearch** — with all `*_enabled` flags `false`: `task opensearch:deploy VENUE=dev` (~15-20 min). Publishes endpoint, ARN, and SG ID to SSM. No access policy yet — expected.
-2. **(2) Deploy in parallel** — all three can proceed as soon as Phase 1 finishes:
-   - **pdc-cds-infra `cognito/user-pool`** *(if Dashboards needed)*: set `o11y_opensearch_dashboards_enabled = true` — reads the endpoint from SSM automatically, constructs the callback URL, creates the Identity Pool, and publishes its ID to SSM. No URL values in tfvars.
-   - **o11y-cloudfront-batch**: `task iam:deploy VENUE=dev` (publishes `ec2_role_arn`), then `task s3:deploy VENUE=dev`
-   - **o11y-cloudfront-streaming**: `iam/` module first (publishes `firehose_role_arn`), then root module
-3. **(3) Grant access + enable Dashboards** — set `o11y_cloudfront_batch_enabled = true`, `o11y_cloudfront_streaming_enabled = true`, and `dashboards_enabled = true` in tfvars, then re-apply. Consumer flags are access-policy-only (seconds). `dashboards_enabled` also wires `cognito_options` (~10 min, config update not replacement). **⚠ Enabling FGAC is irreversible** — domain must be destroyed/recreated to disable.
-4. **(4) Finish o11y-cloudfront-batch** — `task logstash:deploy VENUE=dev` — reads endpoint and bucket from SSM.
+1. **(1) pdc-cds-infra prerequisites** — deploy `cognito/user-pool` (creates the shared PDS Cognito User Pool and IAM roles; leave `o11y_opensearch_dashboards_enabled = false` for now), then `iam/roles` (publishes Cognito role ARNs to SSM). These are shared infra and should already exist in a running environment.
+2. **(2) Bootstrap OpenSearch** — `task opensearch:deploy VENUE=dev` with all `*_enabled = false` (~15-20 min). Publishes endpoint, ARN, and SG ID to SSM. No access policy yet — expected.
+3. **(3a/3b/3c) Deploy in parallel** — all three can start immediately after Phase 2:
+   - **(3a) o11y-cloudfront-batch** `iam/policies` then `s3` — `iam` publishes `ec2_role_arn`; `s3` creates the **`pds-dev-gh01dc-web-analytics`** bucket (where Logstash reads PDS node access logs) and sets its bucket policy
+   - **(3b) o11y-cloudfront-streaming** `iam` only — publishes `firehose_role_arn` and `kinesis_stream_arn` to SSM. The Firehose also backs up to the pre-existing **`pds-logs-dev`** bucket (managed by pdc-cds-infra, not created here). Stop here — don't deploy the root module yet.
+   - **(3c) pdc-cds-infra `cognito/user-pool` re-apply** *(if Dashboards needed)* — set `o11y_opensearch_dashboards_enabled = true`; reads the OpenSearch endpoint from SSM automatically, creates the Identity Pool, publishes its ID to SSM
+4. **(4) pdc-cds-infra CloudFront** — deploy `cloudfront/pds-main` with `enable_o11y_batch = true` and `enable_realtime_logging = true`. Reads `ec2_role_arn` and `kinesis_stream_arn` from SSM. After this, CloudFront writes access logs to **`pds-logs-dev`** and real-time logs to the Kinesis stream.
+5. **(5) o11y-cloudfront-streaming root + grant OpenSearch access** — deploy the o11y-cloudfront-streaming root module (Firehose reads from Kinesis → OpenSearch, backs up to `pds-logs-dev`). Then re-apply this repo with `o11y_cloudfront_batch_enabled = true`, `o11y_cloudfront_streaming_enabled = true`, and `dashboards_enabled = true`. Consumer flags are access-policy-only (seconds); `dashboards_enabled` also wires `cognito_options` (~10 min). **⚠ Enabling FGAC is irreversible.**
+6. **(6) o11y-cloudfront-batch logstash** — `task logstash:deploy VENUE=dev` — reads OpenSearch endpoint and `pds-dev-gh01dc-web-analytics` bucket name from SSM.
 
-No manual URL values or `aws ssm put-parameter` seeding required anywhere — everything is SSM-driven via `*_enabled` flags.
+**Two log buckets:**
+- **`pds-logs-dev`** — pre-existing, managed by pdc-cds-infra. Receives CloudFront standard access logs and Firehose S3 backups.
+- **`pds-dev-gh01dc-web-analytics`** — created by o11y-cloudfront-batch `s3`. Receives PDS node access logs read by Logstash.
+
+No manual URL values or `aws ssm put-parameter` seeding required — everything is SSM-driven via `*_enabled` flags.
 
 ---
 
