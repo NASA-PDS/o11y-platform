@@ -52,27 +52,12 @@ data "aws_ssm_parameter" "cognito_admin_role_arn" {
   name  = "/pds/cds-infra/iam/roles/cognito-admin-role-arn"
 }
 
-# IAM role that allows the OpenSearch service to call Cognito APIs to configure
-# Dashboards auth. AWS requires this role to have the AmazonOpenSearchServiceCognitoAccess
-# managed policy; the trust relationship must allow es.amazonaws.com.
-resource "aws_iam_role" "opensearch_cognito" {
+# IAM service role for OpenSearch→Cognito — created by the o11y-platform iam/ module
+# (separate deploy, requires iam:CreateRole permissions). Deploy iam/ first, then set
+# dashboards_enabled = true here.
+data "aws_ssm_parameter" "opensearch_cognito_role_arn" {
   count = var.dashboards_enabled ? 1 : 0
-  name  = "${var.domain_name}-opensearch-cognito"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "es.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "opensearch_cognito" {
-  count      = var.dashboards_enabled ? 1 : 0
-  role       = aws_iam_role.opensearch_cognito[0].name
-  policy_arn = "arn:${var.partition}:iam::aws:policy/AmazonOpenSearchServiceCognitoAccess"
+  name  = "/pds/o11y-platform/iam/opensearch_cognito_role_arn"
 }
 
 # Security group for the OpenSearch domain VPC endpoint.
@@ -186,7 +171,7 @@ resource "aws_opensearch_domain" "this" { #NOSONAR
       enabled          = true
       user_pool_id     = data.aws_ssm_parameter.cognito_user_pool_id[0].value
       identity_pool_id = data.aws_ssm_parameter.cognito_identity_pool_id[0].value
-      role_arn         = aws_iam_role.opensearch_cognito[0].arn
+      role_arn         = data.aws_ssm_parameter.opensearch_cognito_role_arn[0].value
     }
   }
 
