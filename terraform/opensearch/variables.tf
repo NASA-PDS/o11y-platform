@@ -145,7 +145,7 @@ variable "component" {
 variable "cicd" {
   type        = string
   description = "Tag value for CICD deployment method"
-  default     = "terraform"
+  default     = "iac"
 }
 
 variable "managedby" {
