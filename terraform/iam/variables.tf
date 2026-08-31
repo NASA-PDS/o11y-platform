@@ -12,7 +12,7 @@ variable "partition" {
 
 variable "domain_name" {
   type        = string
-  description = "OpenSearch domain name — used to name the IAM role ${domain_name}-opensearch-cognito"
+  description = "OpenSearch domain name — used to name the IAM role <domain_name>-opensearch-cognito"
 }
 
 variable "venue" {

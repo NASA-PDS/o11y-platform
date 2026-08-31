@@ -69,6 +69,10 @@ Network access is controlled by Security Group ingress rules (port 443). The EC2
 
 ```mermaid
 flowchart TD
+    subgraph p0["Phase 0 — o11y-platform IAM (this repo, requires iam:CreateRole)"]
+        OIAM["iam/\ncreates opensearch-cognito IAM role\npublishes role ARN → SSM"]
+    end
+
     subgraph p1["Phase 1 — bootstrap OpenSearch (this repo)"]
         OS1["opensearch\nall *_enabled = false\n(~15-20 min)\npublishes endpoint → SSM"]
     end
@@ -100,6 +104,7 @@ flowchart TD
     end
 
 
+    OIAM -->|"cognito_role_arn → SSM"| OS1
     OS1 -->|"endpoint, arn, SG id → SSM"| p2a
     OS1 -->|"endpoint, SG id → SSM"| p2b
     OS1 -->|"endpoint → SSM"| p2c
@@ -113,6 +118,7 @@ flowchart TD
     CFMAIN --> OS2
 ```
 
+0. **(0) o11y-platform IAM** — `task iam:deploy VENUE=dev` (requires `iam:CreateRole`). Creates the `${domain_name}-opensearch-cognito` IAM service role and publishes its ARN to SSM at `/pds/o11y-platform/iam/opensearch_cognito_role_arn`. Only needed when `dashboards_enabled = true`.
 1. **(1) Bootstrap OpenSearch** — `task opensearch:deploy VENUE=dev` with all `*_enabled = false` (~15-20 min). Publishes endpoint, ARN, and SG ID to SSM. No Cognito or consumer dependencies at this phase.
 2. **(2a/2b/2c) Deploy in parallel** — all three can start immediately after Phase 1:
    - **(2a) o11y-cloudfront-batch** `iam/policies` → `s3` → `logstash` — `s3` creates the **`pds-dev-gh01dc-web-analytics`** bucket; `logstash` deploys the EC2 instance and publishes `ec2_role_arn` and the bucket name to SSM. Logstash will idle until CloudFront starts writing logs in Phase 3.
