@@ -47,67 +47,6 @@ tasks:
               echo "Credentials are valid for ~1 hour."
 
     # ------------------------------------------------------------------
-    # IAM roles (requires iam:CreateRole — deploy before opensearch when
-    # dashboards_enabled = true)
-    # ------------------------------------------------------------------
-
-    iam:init:
-        desc: "Initialize IAM Terraform"
-        deps: [aws]
-        dir: iam
-        requires:
-            vars:
-                - name: VENUE
-                  enum: [dev, test, prod]
-        cmds:
-            - terraform init -no-color -reconfigure -backend-config=backend-{{.VENUE}}.hcl {{.CLI_ARGS}}
-
-    iam:plan:
-        desc: "Plan IAM changes"
-        deps: ["iam:init"]
-        dir: iam
-        requires:
-            vars:
-                - name: VENUE
-                  enum: [dev, test, prod]
-        vars:
-            TFVARS:
-                sh: |
-                    if [ "{{.LOCAL}}" = "1" ]; then
-                        echo "tfvars/{{.VENUE}}.tfvars"
-                    elif [ -n "$CDS_INFRA_DEPLOY_DIR" ]; then
-                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/o11y-platform/iam.tfvars"
-                    else
-                        echo "Set CDS_INFRA_DEPLOY_DIR or pass LOCAL=1" >&2
-                        exit 1
-                    fi
-        cmds:
-            - terraform plan -var-file={{.TFVARS}} {{.CLI_ARGS}}
-
-    iam:deploy:
-        desc: "Deploy IAM roles (requires iam:CreateRole permission)"
-        aliases: ["iam:apply"]
-        deps: ["iam:init"]
-        dir: iam
-        requires:
-            vars:
-                - name: VENUE
-                  enum: [dev, test, prod]
-        vars:
-            TFVARS:
-                sh: |
-                    if [ "{{.LOCAL}}" = "1" ]; then
-                        echo "tfvars/{{.VENUE}}.tfvars"
-                    elif [ -n "$CDS_INFRA_DEPLOY_DIR" ]; then
-                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/o11y-platform/iam.tfvars"
-                    else
-                        echo "Set CDS_INFRA_DEPLOY_DIR or pass LOCAL=1" >&2
-                        exit 1
-                    fi
-        cmds:
-            - terraform apply -var-file={{.TFVARS}} {{.CLI_ARGS}}
-
-    # ------------------------------------------------------------------
     # OpenSearch domain (shared platform)
     # Can be run by Project-Power-User.
     # ------------------------------------------------------------------

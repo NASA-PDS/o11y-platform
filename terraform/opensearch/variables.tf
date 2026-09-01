@@ -107,12 +107,6 @@ variable "ec2_security_group_name" {
   default     = ""
 }
 
-variable "dashboards_enabled" {
-  type        = bool
-  description = "Expose OpenSearch Dashboards via Cognito auth. When true: enables FGAC, attaches cognito_options (User Pool + Identity Pool from pdc-cds-infra SSM), and creates the OpenSearch→Cognito IAM service role. Requires pdc-cds-infra cognito/user-pool to have been deployed with opensearch_dashboards_callback_urls set to the Dashboards endpoint. Leave false for initial bootstrap; flip to true and re-apply once the Cognito resources exist — this triggers a domain configuration update, not a domain replacement."
-  default     = false
-}
-
 variable "o11y_cloudfront_batch_enabled" {
   type        = bool
   description = "Whether the o11y-cloudfront-batch consumer has been deployed. When true, its Logstash EC2 role ARN is read from SSM (/pds/o11y-cloudfront-batch/iam/ec2_role_arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before o11y-cloudfront-batch's iam/policies module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment."

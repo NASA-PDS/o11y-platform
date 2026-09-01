@@ -23,17 +23,6 @@ data "aws_ssm_parameter" "firehose_security_group_id" {
   name  = "/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id"
 }
 
-# Read Cognito resources provisioned by pdc-cds-infra. Only looked up when dashboards_enabled = true.
-data "aws_ssm_parameter" "cognito_user_pool_id" {
-  count = var.dashboards_enabled ? 1 : 0
-  name  = "/pds/cds-infra/cognito/user-pool/user-pool-id"
-}
-
-data "aws_ssm_parameter" "cognito_identity_pool_id" {
-  count = var.dashboards_enabled ? 1 : 0
-  name  = "/pds/cds-infra/cognito/user-pool/opensearch-dashboards-identity-pool-id"
-}
-
 locals {
   module_relative_path = replace(abspath(path.module), "/^.*\\/terraform\\//", "")
   ssm_prefix           = "/pds/o11y-platform/${local.module_relative_path}"
@@ -41,23 +30,7 @@ locals {
   opensearch_access_principals = concat(
     var.o11y_cloudfront_batch_enabled ? [data.aws_ssm_parameter.ec2_role_arn[0].value] : [],
     var.o11y_cloudfront_streaming_enabled ? [data.aws_ssm_parameter.firehose_role_arn[0].value] : [],
-    # Dashboards principal is the Cognito-authenticated admin role from pdc-cds-infra.
-    # Required so Dashboards users can query the domain via FGAC.
-    var.dashboards_enabled ? [data.aws_ssm_parameter.cognito_admin_role_arn[0].value] : [],
   )
-}
-
-data "aws_ssm_parameter" "cognito_admin_role_arn" {
-  count = var.dashboards_enabled ? 1 : 0
-  name  = "/pds/cds-infra/iam/roles/cognito-admin-role-arn"
-}
-
-# IAM service role for OpenSearch→Cognito — created by the o11y-platform iam/ module
-# (separate deploy, requires iam:CreateRole permissions). Deploy iam/ first, then set
-# dashboards_enabled = true here.
-data "aws_ssm_parameter" "opensearch_cognito_role_arn" {
-  count = var.dashboards_enabled ? 1 : 0
-  name  = "/pds/o11y-platform/iam/opensearch_cognito_role_arn"
 }
 
 # Security group for the OpenSearch domain VPC endpoint.
@@ -149,30 +122,10 @@ resource "aws_opensearch_domain" "this" { #NOSONAR
     tls_security_policy = "Policy-Min-TLS-1-2-2019-07"
   }
 
-  # FGAC is required when dashboards_enabled = true (Cognito auth for Dashboards requires it).
-  # When disabled, access is restricted to known IAM role ARNs via resource policy only —
-  # sufficient for ingest-only consumers. AUDIT_LOGS also require FGAC; unavailable when disabled.
   advanced_security_options {
-    enabled                        = var.dashboards_enabled
+    enabled                        = false
     anonymous_auth_enabled         = false
     internal_user_database_enabled = false
-
-    dynamic "master_user_options" {
-      for_each = var.dashboards_enabled ? [1] : []
-      content {
-        master_user_arn = data.aws_ssm_parameter.cognito_admin_role_arn[0].value
-      }
-    }
-  }
-
-  dynamic "cognito_options" {
-    for_each = var.dashboards_enabled ? [1] : []
-    content {
-      enabled          = true
-      user_pool_id     = data.aws_ssm_parameter.cognito_user_pool_id[0].value
-      identity_pool_id = data.aws_ssm_parameter.cognito_identity_pool_id[0].value
-      role_arn         = data.aws_ssm_parameter.opensearch_cognito_role_arn[0].value
-    }
   }
 
   dynamic "vpc_options" {
@@ -190,7 +143,7 @@ resource "aws_opensearch_domain" "this" { #NOSONAR
 
 
 
-# Absent until at least one consumer or dashboards_enabled is true — an access policy with an
+# Absent until at least one consumer is enabled — an access policy with an
 # empty Principal.AWS is invalid, and on the initial bootstrap deploy no role ARNs exist in SSM yet.
 resource "aws_opensearch_domain_policy" "this" {
   count       = length(local.opensearch_access_principals) > 0 ? 1 : 0
