@@ -84,8 +84,8 @@ flowchart TD
         CF["cloudfront/pds-main\n(iam:PassRole to CloudFront realtime log config)\nenable_o11y_batch=true, enable_o11y_streaming=true\nreads kinesis_stream_arn from SSM"]
     end
 
-    subgraph p4["Phase 4 — o11y-cloudfront-streaming root + grant OpenSearch access  🔑 Platform Eng"]
-        CFMAIN["o11y-cloudfront-streaming root  🔑 Platform Eng\n(iam:PassRole to Firehose + Lambda)\nfirehose + kinesis + lambda"]
+    subgraph p4["Phase 4 — o11y-cloudfront-streaming/streaming + grant OpenSearch access  🔑 Platform Eng"]
+        CFMAIN["o11y-cloudfront-streaming/streaming  🔑 Platform Eng\n(iam:PassRole to Firehose + Lambda)\nfirehose + kinesis + lambda"]
         OS2["opensearch re-apply  👤 Power User\no11y_cloudfront_batch_enabled=true\no11y_cloudfront_streaming_enabled=true\n(access policy only — seconds)"]
     end
 
@@ -110,10 +110,10 @@ flowchart TD
      - `iam/policies` — 🔐 **Admin** (`iam:CreatePolicy`, `iam:AttachRolePolicy`; publishes `ec2_role_arn` to SSM)
      - `s3` — 👤 **Power User** (creates `pds-dev-gh01dc-web-analytics` bucket)
      - `logstash` — 🔑 **Platform Engineer** (`iam:PassRole` to EC2 instance profile)
-   - **(2b) o11y-cloudfront-streaming `iam/`** — 🔐 **Admin** (`iam:CreateRole` for Firehose/Lambda/CloudFront roles). Publishes `firehose_role_arn` and `kinesis_stream_arn` to SSM. Stop here — don't deploy the root module yet.
+   - **(2b) o11y-cloudfront-streaming `iam/`** — 🔐 **Admin** (`iam:CreateRole` for Firehose/Lambda/CloudFront roles). Publishes `firehose_role_arn` and `kinesis_stream_arn` to SSM. Stop here — don't deploy `streaming/` yet.
 3. **(3) pdc-cds-infra CloudFront** — 🔑 **Platform Engineer** — deploy `cloudfront/pds-main` with `enable_o11y_batch = true` and `enable_o11y_streaming = true`. Requires `iam:PassRole` because `aws_cloudfront_realtime_log_config` accepts a `role_arn` for CloudFront→Kinesis delivery. Reads `ec2_role_arn` and `kinesis_stream_arn` from SSM.
-4. **(4) o11y-cloudfront-streaming root + grant OpenSearch access** — 🔑 **Platform Engineer** / 👤 **Power User**:
-   - **o11y-cloudfront-streaming root** — 🔑 **Platform Engineer** (`iam:PassRole` for `aws_kinesis_firehose_delivery_stream` and `aws_lambda_function`). Firehose reads from Kinesis → OpenSearch, backs up to `pds-logs-dev`.
+4. **(4) o11y-cloudfront-streaming/streaming + grant OpenSearch access** — 🔑 **Platform Engineer** / 👤 **Power User**:
+   - **o11y-cloudfront-streaming/streaming** — 🔑 **Platform Engineer** (`iam:PassRole` for `aws_kinesis_firehose_delivery_stream` and `aws_lambda_function`). Firehose reads from Kinesis → OpenSearch, backs up to `pds-logs-dev`.
    - **opensearch re-apply** — 👤 **Power User** — `task apply VENUE=dev COMPONENT=o11y-platform/opensearch` with `o11y_cloudfront_batch_enabled = true` and `o11y_cloudfront_streaming_enabled = true` set in the terragrunt inputs. Access-policy-only update, completes in seconds.
 5. **(5) OpenSearch UI Application** — 👤 **Power User** (manual) — see [OpenSearch UI Application](#opensearch-ui-application) for the full sequence. Grant `prod-en-platform-engineer` as the application admin.
 
@@ -183,7 +183,7 @@ task plan  VENUE=dev COMPONENT=o11y-cloudfront-streaming/iam
 task apply VENUE=dev COMPONENT=o11y-cloudfront-streaming/iam
 ```
 
-Publishes `firehose_role_arn` and `kinesis_stream_arn` to SSM. Stop here — do not deploy the streaming root module yet.
+Publishes `firehose_role_arn` and `kinesis_stream_arn` to SSM. Stop here — do not deploy `streaming/` yet.
 
 ### Phase 2c — pdc-cds-infra CloudFront 🔑 Platform Engineer (after 2a + 2b complete)
 
@@ -208,12 +208,12 @@ task plan  VENUE=dev COMPONENT=o11y-cloudfront-batch/logstash
 task apply VENUE=dev COMPONENT=o11y-cloudfront-batch/logstash
 ```
 
-### Phase 3 — o11y-cloudfront-streaming root + re-enable OpenSearch consumers
+### Phase 3 — o11y-cloudfront-streaming/streaming + re-enable OpenSearch consumers
 
 ```bash
 # 🔑 Platform Engineer
-task plan  VENUE=dev COMPONENT=o11y-cloudfront-streaming
-task apply VENUE=dev COMPONENT=o11y-cloudfront-streaming
+task plan  VENUE=dev COMPONENT=o11y-cloudfront-streaming/streaming
+task apply VENUE=dev COMPONENT=o11y-cloudfront-streaming/streaming
 
 # 👤 Power User — flip o11y_cloudfront_batch_enabled and o11y_cloudfront_streaming_enabled
 # to true in cds-infra-deploy venues/<venue>/o11y-platform/opensearch/terragrunt.hcl first
