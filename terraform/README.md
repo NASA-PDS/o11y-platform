@@ -142,23 +142,65 @@ No local tfvars files are needed — all variables are managed as Terragrunt inp
 
 ## Deployment
 
-### OpenSearch domain bootstrap — 👤 Power User (~15-20 min)
+All commands below run from a checkout of `cds-infra-deploy`. Replace `dev` with the target venue.
+
+### Phase 1 — Bootstrap OpenSearch 👤 Power User (~15-20 min)
 
 ```bash
-cd /path/to/cds-infra-deploy
-
 task plan  VENUE=dev COMPONENT=o11y-platform/opensearch
 task apply VENUE=dev COMPONENT=o11y-platform/opensearch
 ```
 
-After deploy, the endpoint, domain ARN, and security group ID are published to SSM automatically:
-```
-/pds/o11y-platform/opensearch/opensearch_endpoint
-/pds/o11y-platform/opensearch/opensearch_arn
-/pds/o11y-platform/opensearch/opensearch_security_group_id
+Publishes endpoint, ARN, and SG ID to SSM — no consumers enabled yet.
+
+### Phase 2a — o11y-cloudfront-batch (sequential, three access tiers)
+
+```bash
+# 🔐 Admin
+task plan  VENUE=dev COMPONENT=o11y-cloudfront-batch/iam/policies
+task apply VENUE=dev COMPONENT=o11y-cloudfront-batch/iam/policies
+
+# 👤 Power User
+task plan  VENUE=dev COMPONENT=o11y-cloudfront-batch/s3
+task apply VENUE=dev COMPONENT=o11y-cloudfront-batch/s3
+
+# 🔑 Platform Engineer
+task plan  VENUE=dev COMPONENT=o11y-cloudfront-batch/logstash
+task apply VENUE=dev COMPONENT=o11y-cloudfront-batch/logstash
 ```
 
-See [Deployment flow](#deployment-flow) above for when to re-run this with `o11y_cloudfront_batch_enabled` / `o11y_cloudfront_streaming_enabled` set to `true` in the terragrunt inputs.
+### Phase 2b — o11y-cloudfront-streaming IAM 🔐 Admin (parallel with 2a)
+
+```bash
+task plan  VENUE=dev COMPONENT=o11y-cloudfront-streaming/iam
+task apply VENUE=dev COMPONENT=o11y-cloudfront-streaming/iam
+```
+
+Stop here — do not deploy the streaming root module yet.
+
+### Phase 3 — pdc-cds-infra CloudFront 🔑 Platform Engineer
+
+```bash
+task plan  VENUE=dev COMPONENT=pdc-cds-infra/cloudfront/pds-main
+task apply VENUE=dev COMPONENT=pdc-cds-infra/cloudfront/pds-main
+```
+
+### Phase 4 — o11y-cloudfront-streaming root + re-enable OpenSearch consumers
+
+```bash
+# 🔑 Platform Engineer
+task plan  VENUE=dev COMPONENT=o11y-cloudfront-streaming
+task apply VENUE=dev COMPONENT=o11y-cloudfront-streaming
+
+# 👤 Power User — flip o11y_cloudfront_batch_enabled and o11y_cloudfront_streaming_enabled
+# to true in cds-infra-deploy venues/<venue>/o11y-platform/opensearch/terragrunt.hcl first
+task plan  VENUE=dev COMPONENT=o11y-platform/opensearch
+task apply VENUE=dev COMPONENT=o11y-platform/opensearch
+```
+
+### Phase 5 — OpenSearch UI Application 👤 Power User (manual)
+
+See [OpenSearch UI Application](#opensearch-ui-application) below.
 
 ---
 
@@ -166,7 +208,7 @@ See [Deployment flow](#deployment-flow) above for when to re-run this with `o11y
 
 Principals are read from SSM at plan time, each gated by a Terragrunt input flag so this repo can bootstrap before any consumer exists.
 
-| tfvars flag | SSM path (read only when flag is `true`) | Published by |
+| Terragrunt input flag | SSM path (read only when flag is `true`) | Published by |
 |---|---|---|
 | `o11y_cloudfront_batch_enabled` | `/pds/o11y-cloudfront-batch/iam/ec2_role_arn` | o11y-cloudfront-batch `iam/policies` module |
 | `o11y_cloudfront_streaming_enabled` | `/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn` | o11y-cloudfront-streaming `iam/` module |
@@ -237,5 +279,5 @@ task destroy VENUE=dev COMPONENT=o11y-platform/opensearch   # destroys all index
 ## Architecture notes
 
 - **State** — S3 backend, key `o11y-platform/opensearch.tfstate`.
-- **VPC/SG values** are in tfvars. TODO: source EC2 SG from SSM under `/pds/cds-infra/vpc/security_groups/` once MCP publishes it.
+- **VPC/SG values** are Terragrunt inputs in `cds-infra-deploy`. TODO: source EC2 SG from SSM under `/pds/cds-infra/vpc/security_groups/` once MCP publishes it.
 - **Adding a new consumer** — publish its role ARN to SSM, add a `data "aws_ssm_parameter"` block in `opensearch/main.tf`, add the ARN to the access policy principals, and add an SG ingress rule if needed.
