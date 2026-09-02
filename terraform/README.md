@@ -153,25 +153,18 @@ task apply VENUE=dev COMPONENT=o11y-platform/opensearch
 
 Publishes endpoint, ARN, and SG ID to SSM — no consumers enabled yet.
 
-### Phase 2a — o11y-cloudfront-batch (sequential, three access tiers)
+### Phase 2a — o11y-cloudfront-batch IAM 🔐 Admin
 
 ```bash
-# 🔐 Admin
 task plan  VENUE=dev COMPONENT=o11y-cloudfront-batch/iam/policies
 task apply VENUE=dev COMPONENT=o11y-cloudfront-batch/iam/policies
-
-# 👤 Power User
-task plan  VENUE=dev COMPONENT=o11y-cloudfront-batch/s3
-task apply VENUE=dev COMPONENT=o11y-cloudfront-batch/s3
-
-# 🔑 Platform Engineer
-task plan  VENUE=dev COMPONENT=o11y-cloudfront-batch/logstash
-task apply VENUE=dev COMPONENT=o11y-cloudfront-batch/logstash
 ```
+
+Publishes `ec2_role_arn` to SSM.
 
 ### Phase 2b — o11y-cloudfront-streaming IAM 🔐 Admin (parallel with 2a)
 
-`o11y-cloudfront-streaming/iam` reads `/pds/pdc-cds-infra/s3/pds-logs-bucket-arn` from SSM at plan time. This parameter is published by `pdc-cds-infra/cloudfront/pds-main` (Phase 3) — but since `pds-logs-<venue>` is a pre-existing bucket, seed it manually first:
+`o11y-cloudfront-streaming/iam` reads `/pds/pdc-cds-infra/s3/pds-logs-bucket-arn` from SSM. On a **first-time deploy** this param doesn't exist yet — seed it once before running this phase (`pdc-cds-infra/cloudfront` will take ownership of it in Phase 2c):
 
 ```bash
 VENUE=dev   # set to your target venue
@@ -190,16 +183,32 @@ task plan  VENUE=dev COMPONENT=o11y-cloudfront-streaming/iam
 task apply VENUE=dev COMPONENT=o11y-cloudfront-streaming/iam
 ```
 
-Stop here — do not deploy the streaming root module yet. Phase 3 (CloudFront) will overwrite the SSM parameter with the same value via Terraform.
+Publishes `firehose_role_arn` and `kinesis_stream_arn` to SSM. Stop here — do not deploy the streaming root module yet.
 
-### Phase 3 — pdc-cds-infra CloudFront 🔑 Platform Engineer
+### Phase 2c — pdc-cds-infra CloudFront 🔑 Platform Engineer (after 2a + 2b complete)
+
+Reads `ec2_role_arn` (from 2a) and `kinesis_stream_arn` (from 2b). Also takes ownership of the `pds-logs-bucket-arn` SSM param seeded above.
 
 ```bash
 task plan  VENUE=dev COMPONENT=pdc-cds-infra/cloudfront/pds-main
 task apply VENUE=dev COMPONENT=pdc-cds-infra/cloudfront/pds-main
 ```
 
-### Phase 4 — o11y-cloudfront-streaming root + re-enable OpenSearch consumers
+### Phase 2d — o11y-cloudfront-batch S3 + Logstash 👤 Power User / 🔑 Platform Engineer (parallel with 2c)
+
+These don't depend on CloudFront and can run alongside Phase 2c:
+
+```bash
+# 👤 Power User
+task plan  VENUE=dev COMPONENT=o11y-cloudfront-batch/s3
+task apply VENUE=dev COMPONENT=o11y-cloudfront-batch/s3
+
+# 🔑 Platform Engineer
+task plan  VENUE=dev COMPONENT=o11y-cloudfront-batch/logstash
+task apply VENUE=dev COMPONENT=o11y-cloudfront-batch/logstash
+```
+
+### Phase 3 — o11y-cloudfront-streaming root + re-enable OpenSearch consumers
 
 ```bash
 # 🔑 Platform Engineer
@@ -212,7 +221,7 @@ task plan  VENUE=dev COMPONENT=o11y-platform/opensearch
 task apply VENUE=dev COMPONENT=o11y-platform/opensearch
 ```
 
-### Phase 5 — OpenSearch UI Application 👤 Power User (manual)
+### Phase 4 — OpenSearch UI Application 👤 Power User (manual)
 
 See [OpenSearch UI Application](#opensearch-ui-application) below.
 
@@ -235,7 +244,7 @@ Both default to `false`. With both false, `aws_opensearch_domain_policy` isn't c
 
 The **OpenSearch UI Application** is a separately AWS-hosted web UI — distinct from the built-in `/_dashboards` endpoint. It connects to the VPC-only domain without requiring a public endpoint, supports multiple data sources and workspaces, and is the ops access path for this platform. IAM Identity Center is not enabled in PDS accounts; this uses IAM auth instead (IAM role ARNs granted directly as admins).
 
-> **No Terraform resource exists yet** — `aws_opensearch_application` is tracked in [hashicorp/terraform-provider-aws#45082](https://github.com/hashicorp/terraform-provider-aws/issues/45082). All steps below are manual (console + CLI). Run after Phase 4 is complete.
+> **No Terraform resource exists yet** — `aws_opensearch_application` is tracked in [hashicorp/terraform-provider-aws#45082](https://github.com/hashicorp/terraform-provider-aws/issues/45082). All steps below are manual (console + CLI). Run after Phase 3 is complete.
 
 > **Access tier:** 👤 **Power User** for all steps below.
 
