@@ -42,7 +42,7 @@ OpenSearch is a shared platform — both o11y-cloudfront-batch and o11y-cloudfro
 
 ## First deployment
 
-All deployments are driven by Terragrunt from [cds-infra-deploy](https://github.com/NASA-PDS/cds-infra-deploy). The phases below must run in order; phases marked **(parallel)** can run simultaneously.
+All deployments are driven by Terragrunt from `cds-infra-deploy`. The phases below must run in order; phases marked **(parallel)** can run simultaneously.
 
 All commands run from a checkout of `cds-infra-deploy` using: `task plan VENUE=<venue> COMPONENT=<component>` and `task apply VENUE=<venue> COMPONENT=<component>`.
 

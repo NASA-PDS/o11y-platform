@@ -129,7 +129,7 @@ No manual URL values or `aws ssm put-parameter` seeding required — everything 
 
 - [Terragrunt](https://terragrunt.gruntwork.io/docs/getting-started/install/) >= 0.55
 - [Task](https://taskfile.dev) — `brew install go-task/tap/go-task`
-- A local checkout of [cds-infra-deploy](https://git.smce.nasa.gov/nasa-pds/cds-infra-deploy) — all Terragrunt inputs (vpc_id, subnet IDs, feature flags, etc.) live there as `venues/<venue>/o11y-platform/opensearch/terragrunt.hcl`
+- A local checkout of `cds-infra-deploy` — all Terragrunt inputs (vpc_id, subnet IDs, feature flags, etc.) live there as `venues/<venue>/o11y-platform/opensearch/terragrunt.hcl`
 - AWS credentials exported:
   ```bash
   eval $(aws configure export-credentials --profile <your-profile> --format env)
