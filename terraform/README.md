@@ -174,9 +174,11 @@ task apply VENUE=dev COMPONENT=o11y-cloudfront-batch/logstash
 `o11y-cloudfront-streaming/iam` reads `/pds/pdc-cds-infra/s3/pds-logs-bucket-arn` from SSM at plan time. This parameter is published by `pdc-cds-infra/cloudfront/pds-main` (Phase 3) — but since `pds-logs-<venue>` is a pre-existing bucket, seed it manually first:
 
 ```bash
+VENUE=dev   # set to your target venue
+
 aws ssm put-parameter \
   --name "/pds/pdc-cds-infra/s3/pds-logs-bucket-arn" \
-  --value "arn:aws:s3:::pds-logs-<venue>" \
+  --value "arn:aws:s3:::pds-logs-${VENUE}" \
   --type String \
   --region us-west-2
 ```
