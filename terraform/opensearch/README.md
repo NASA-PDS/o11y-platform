@@ -87,8 +87,8 @@ cd /path/to/cds-infra-deploy
 eval $(aws configure export-credentials --profile <your-profile> --format env)
 unset AWS_PROFILE
 
-terragrunt plan  --terragrunt-working-dir venues/dev/o11y-platform/opensearch
-terragrunt apply --terragrunt-working-dir venues/dev/o11y-platform/opensearch
+terragrunt plan  --working-dir venues/dev/o11y-platform/opensearch
+terragrunt apply --working-dir venues/dev/o11y-platform/opensearch
 ```
 
 Domain creation takes ~15–20 minutes.
