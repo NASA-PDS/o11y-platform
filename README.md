@@ -1,12 +1,12 @@
 # Planetary Data Cloud (PDC) o11y-platform
 
-Shared OpenSearch-backed observability platform for the Planetary Data Cloud. Aggregates logs from PDS services such as o11y-cloudfront-batch and CloudFront realtime monitoring for search and dashboards
+Shared OpenSearch-backed observability platform for the Planetary Data Cloud. Aggregates logs from PDS services — batch node access logs via Logstash and CloudFront real-time logs via Kinesis Firehose.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    subgraph wa["o11y-cloudfront-batch"]
+    subgraph batch["o11y-cloudfront-batch"]
         LS["Logstash EC2"]
     end
 
@@ -14,7 +14,7 @@ flowchart LR
         OS["OpenSearch"]
     end
 
-    subgraph cf["o11y-cloudfront-streaming"]
+    subgraph streaming["o11y-cloudfront-streaming"]
         FH["Kinesis Firehose"]
     end
 
@@ -40,22 +40,23 @@ OpenSearch is a shared platform — both o11y-cloudfront-batch and o11y-cloudfro
 | [o11y-cloudfront-batch](https://github.com/NASA-PDS/o11y-cloudfront-batch) | Parsed PDS node access logs (ECS v8) |
 | [o11y-cloudfront-streaming](https://github.com/NASA-PDS/o11y-cloudfront-streaming) | CloudFront real-time log stream |
 
-## Development
+## First deployment
 
-Install in editable mode with dev dependencies:
+All deployments are driven by Terragrunt from [cds-infra-deploy](https://github.com/NASA-PDS/cds-infra-deploy). The phases below must run in order; phases marked **(parallel)** can run simultaneously.
 
-    pip install --editable '.[dev]'
+| Phase | What | Repo | IAM tier required |
+|---|---|---|---|
+| **0** | OpenSearch domain (consumers disabled) | [o11y-platform `terraform/opensearch/`](terraform/README.md) | PowerUser |
+| **1a** *(parallel)* | Streaming IAM roles | [o11y-cloudfront-streaming `terraform/iam/`](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/iam/README.md) | Admin (`iam:CreateRole`) |
+| **1b** *(parallel)* | Batch IAM policies + S3 bucket | [o11y-cloudfront-batch `terraform/iam/policies/` + `terraform/s3/`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md) | Admin (`iam:CreatePolicy`) |
+| **2a** | Streaming Kinesis/Firehose/Lambda | [o11y-cloudfront-streaming `terraform/`](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md) | PowerUser |
+| **2b** | Logstash EC2 | [o11y-cloudfront-batch `terraform/logstash/`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md) | Admin (`iam:PassRole`) |
+| **3** | OpenSearch access policy update (both consumers enabled) | [o11y-platform `terraform/opensearch/`](terraform/README.md) | PowerUser |
+| **4** | CloudFront real-time log config + cache behaviors | [pdc-cds-infra `terraform/cloudfront/pds-main/`](https://github.com/NASA-PDS/pdc-cds-infra) | PowerUser |
 
-See [the wiki entry on Secrets](https://github.com/NASA-PDS/nasa-pds.github.io/wiki/Git-and-Github-Guide#detect-secrets) to install and set up detect-secrets.
+Each phase publishes its outputs to SSM; the next phase reads them automatically at plan time — no manual parameter seeding needed.
 
-Then configure the `pre-commit` hooks:
-
-    pre-commit install
-    pre-commit install -t pre-push
-    pre-commit install -t prepare-commit-msg
-    pre-commit install -t commit-msg
-
-👉 **Note:** A one-time setup is required both to support `detect-secrets` and in your global Git configuration. See [the wiki entry on Secrets](https://github.com/NASA-PDS/nasa-pds.github.io/wiki/Git-and-Github-Guide#detect-secrets) to learn how.
+See [`terraform/README.md`](terraform/README.md) for full deploy and upgrade instructions.
 
 ## Infrastructure
 

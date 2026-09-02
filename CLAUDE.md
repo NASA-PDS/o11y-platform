@@ -63,12 +63,6 @@ This repo depends on [pdc-cds-infra](https://github.com/NASA-PDS/pdc-cds-infra) 
 
 ```
 terraform/
-  ├── iam/                         # IAM roles (requires iam:CreateRole — deploy before opensearch when dashboards_enabled = true)
-  │   ├── main.tf                  # opensearch-cognito IAM role + policy attachment
-  │   ├── outputs.tf               # Publishes role ARN to /pds/o11y-platform/iam/opensearch_cognito_role_arn
-  │   ├── variables.tf
-  │   ├── backend.tf               # S3 backend key: o11y-platform/iam.tfstate
-  │   └── backend-<venue>.hcl
   ├── opensearch/                  # OpenSearch domain (shared platform)
   │   ├── main.tf                  # Domain, SGs, access policy, cognito_options
   │   ├── outputs.tf               # Publishes endpoint + ARN + security group ID to SSM
@@ -82,7 +76,7 @@ terraform/
   │       ├── dev.tfvars.example   # Template — copy to dev.tfvars (gitignored)
   │       ├── dev.tfvars           # gitignored — VPC IDs, SG names/IDs
   │       └── prod.tfvars          # gitignored
-  ├── Taskfile.yaml                # Task runner for iam:* and opensearch:* commands
+  ├── Taskfile.yaml                # Task runner for opensearch:* commands
   └── .taskrc.yaml                 # interactive: true (enables VENUE enum prompting)
 ```
 

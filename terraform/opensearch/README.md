@@ -45,7 +45,7 @@ No modules.
 | <a name="input_vpc_enabled"></a> [vpc\_enabled](#input\_vpc\_enabled) | Deploy the domain inside a VPC. This module is intended to be VPC-only. | `bool` | n/a | yes |
 | <a name="input_availability_zone_count"></a> [availability\_zone\_count](#input\_availability\_zone\_count) | Number of AZs for zone awareness. Must match data\_node\_count and number of vpc\_subnet\_ids. Only used when zone\_awareness\_enabled = true. | `number` | `3` | no |
 | <a name="input_aws_region"></a> [aws\_region](#input\_aws\_region) | Effective AWS Region | `string` | `"us-west-2"` | no |
-| <a name="input_cicd"></a> [cicd](#input\_cicd) | Tag value for CICD deployment method | `string` | `"terraform"` | no |
+| <a name="input_cicd"></a> [cicd](#input\_cicd) | Tag value for CICD deployment method | `string` | `"iac"` | no |
 | <a name="input_component"></a> [component](#input\_component) | Tag value for component | `string` | `"o11y-platform"` | no |
 | <a name="input_data_node_count"></a> [data\_node\_count](#input\_data\_node\_count) | Number of data nodes | `number` | `3` | no |
 | <a name="input_data_node_instance_type"></a> [data\_node\_instance\_type](#input\_data\_node\_instance\_type) | Instance type for data nodes | `string` | `"r6g.xlarge.search"` | no |
@@ -54,7 +54,7 @@ No modules.
 | <a name="input_ec2_security_group_name"></a> [ec2\_security\_group\_name](#input\_ec2\_security\_group\_name) | Name of the MCP EC2 security group. Used to allow 443 inbound to the OpenSearch domain. Required when vpc\_enabled = true. | `string` | `""` | no |
 | <a name="input_encryption_at_rest"></a> [encryption\_at\_rest](#input\_encryption\_at\_rest) | Enable encryption at rest | `bool` | `true` | no |
 | <a name="input_engine_version"></a> [engine\_version](#input\_engine\_version) | OpenSearch engine version (e.g. OpenSearch\_2.17). Pin to the deployed version to prevent unintended upgrades. | `string` | `"OpenSearch_2.19"` | no |
-| <a name="input_managedby"></a> [managedby](#input\_managedby) | Tag value for owner managing the resource (e.g. PDS Team email distro) | `string` | `"pdsoperator@jpl.nasa.gov"` | no |
+| <a name="input_managedby"></a> [managedby](#input\_managedby) | Tag value for owner managing the resource (e.g. PDS Team email distro) | `string` | n/a | yes |
 | <a name="input_master_node_count"></a> [master\_node\_count](#input\_master\_node\_count) | Number of dedicated master nodes | `number` | `3` | no |
 | <a name="input_master_node_instance_type"></a> [master\_node\_instance\_type](#input\_master\_node\_instance\_type) | Instance type for dedicated master nodes | `string` | `"m6g.large.search"` | no |
 | <a name="input_node_to_node_encryption"></a> [node\_to\_node\_encryption](#input\_node\_to\_node\_encryption) | Enable node-to-node encryption | `bool` | `true` | no |
@@ -78,14 +78,82 @@ No modules.
 
 ## Deploy
 
+### Primary (Terragrunt via cds-infra-deploy)
+
 ```bash
-cp tfvars/dev.tfvars.example tfvars/dev.tfvars
-# edit tfvars/dev.tfvars — fill in vpc_id, subnet_ids, security group IDs
+cd /path/to/cds-infra-deploy
+
+# Export AWS credentials (unset AWS_PROFILE for S3 backend compatibility)
+eval $(aws configure export-credentials --profile <your-profile> --format env)
+unset AWS_PROFILE
+
+terragrunt plan  --terragrunt-working-dir venues/dev/o11y-platform/opensearch
+terragrunt apply --terragrunt-working-dir venues/dev/o11y-platform/opensearch
+```
+
+Domain creation takes ~15–20 minutes.
+
+### Fallback (local iteration via Task)
+
+```bash
+cd terraform/
+cp opensearch/tfvars/dev.tfvars.example opensearch/tfvars/dev.tfvars
+# edit dev.tfvars: fill in domain_name, vpc_id, vpc_subnet_ids, ec2_security_group_name
+
+eval $(aws configure export-credentials --profile <your-profile> --format env)
+unset AWS_PROFILE
 
 task opensearch:plan   VENUE=dev LOCAL=1
 task opensearch:deploy VENUE=dev LOCAL=1
 ```
 
-Domain creation takes ~15–20 minutes. Plan output is intentionally not saved with `-out` — re-run plan immediately before apply.
+### Post-deploy: authorize console access for VPC domains
 
-> **Note:** This module does not use a `common-<venue>.tfvars` file. All variables are supplied via `tfvars/<venue>.tfvars` alone.
+For `vpc_enabled = true` domains, the AWS Console's OpenSearch "Indexes" tab (and
+other AWS-managed console features) cannot reach the domain until the
+`application.opensearchservice.amazonaws.com` service principal is explicitly
+authorized. This is a one-time, per-domain authorization that isn't covered by
+the domain's access policy and isn't currently expressible in the Terraform AWS
+provider (`aws_opensearch_authorize_vpc_endpoint_access` only supports
+authorizing AWS accounts, not service principals — see
+[hashicorp/terraform-provider-aws#41879](https://github.com/hashicorp/terraform-provider-aws/issues/41879)).
+
+Run this manually after every `opensearch:deploy` that creates a new domain
+(not needed for updates to an existing domain). `domain_name` isn't published
+to SSM directly, so it's pulled from the domain ARN:
+
+```bash
+export AWS_PROFILE=<your-profile>
+
+DOMAIN_NAME=$(aws ssm get-parameter \
+  --name /pds/o11y-platform/opensearch/opensearch_arn \
+  --query Parameter.Value --output text \
+  | awk -F/ '{print $NF}')
+
+aws opensearch authorize-vpc-endpoint-access \
+  --domain-name "$DOMAIN_NAME" \
+  --service application.opensearchservice.amazonaws.com
+```
+
+Without this, the console will show: *"The OpenSearch Service Features cannot
+access this VPC-enabled domain."*
+
+### Smoke test
+
+After deploy, verify SSM parameters are published and the endpoint is reachable:
+
+```bash
+bash scripts/smoke-test.sh dev
+```
+
+The script checks that all three SSM parameters (`opensearch_endpoint`, `opensearch_arn`, `opensearch_security_group_id`) exist and that the endpoint returns an expected response.
+
+## Upgrade
+
+### Engine version
+
+Update `engine_version` in the tfvars (e.g. `"OpenSearch_2.19"` → next version) and re-apply. AWS performs a blue/green upgrade — the domain stays up but enters "Processing" state for ~30 minutes. No downtime for consumers. Always pin the version explicitly; do not rely on the module default, which tracks the latest tested version.
+
+### Node count or instance type
+
+Update `data_node_count`, `data_node_instance_type`, or `master_node_instance_type` and re-apply. For single-node dev clusters scaling to multi-node, also set `zone_awareness_enabled = true` and provide multiple `vpc_subnet_ids` (one per AZ) — this triggers a domain configuration update (~10 min), not a replacement.
