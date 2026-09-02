@@ -171,12 +171,24 @@ task apply VENUE=dev COMPONENT=o11y-cloudfront-batch/logstash
 
 ### Phase 2b — o11y-cloudfront-streaming IAM 🔐 Admin (parallel with 2a)
 
+`o11y-cloudfront-streaming/iam` reads `/pds/pdc-cds-infra/s3/pds-logs-bucket-arn` from SSM at plan time. This parameter is published by `pdc-cds-infra/cloudfront/pds-main` (Phase 3) — but since `pds-logs-<venue>` is a pre-existing bucket, seed it manually first:
+
+```bash
+aws ssm put-parameter \
+  --name "/pds/pdc-cds-infra/s3/pds-logs-bucket-arn" \
+  --value "arn:aws:s3:::pds-logs-<venue>" \
+  --type String \
+  --region us-west-2
+```
+
+Then deploy:
+
 ```bash
 task plan  VENUE=dev COMPONENT=o11y-cloudfront-streaming/iam
 task apply VENUE=dev COMPONENT=o11y-cloudfront-streaming/iam
 ```
 
-Stop here — do not deploy the streaming root module yet.
+Stop here — do not deploy the streaming root module yet. Phase 3 (CloudFront) will overwrite the SSM parameter with the same value via Terraform.
 
 ### Phase 3 — pdc-cds-infra CloudFront 🔑 Platform Engineer
 
