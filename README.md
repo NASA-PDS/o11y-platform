@@ -51,10 +51,10 @@ All commands run from a checkout of `cds-infra-deploy` using: `task plan VENUE=<
 | **0** | OpenSearch domain (consumers disabled; re-enabled in Phase 3) | [o11y-platform `terraform/opensearch/`](terraform/README.md) | PowerUser |
 | **1a** *(parallel)* | Streaming IAM roles | [o11y-cloudfront-streaming `terraform/iam/`](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/iam/README.md) | Admin (`iam:CreateRole`) |
 | **1b** *(parallel)* | Batch IAM policies + S3 bucket | [o11y-cloudfront-batch `terraform/iam/policies/` + `terraform/s3/`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md) | Admin (`iam:CreatePolicy`) |
-| **2a** | Streaming Kinesis/Firehose/Lambda | [o11y-cloudfront-streaming `terraform/`](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md) | PowerUser |
-| **2b** | Logstash EC2 | [o11y-cloudfront-batch `terraform/logstash/`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md) | Admin (`iam:PassRole`) |
+| **2a** | Streaming Kinesis/Firehose/Lambda | [o11y-cloudfront-streaming `terraform/`](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md) | Platform Engineer (`iam:PassRole`) |
+| **2b** | Logstash EC2 | [o11y-cloudfront-batch `terraform/logstash/`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md) | Platform Engineer (`iam:PassRole`) |
 | **3** | Re-apply OpenSearch with both consumers enabled | [o11y-platform `terraform/opensearch/`](terraform/README.md) | PowerUser |
-| **4** | CloudFront real-time log config + cache behaviors | [pdc-cds-infra `terraform/cloudfront/pds-main/`](https://github.com/NASA-PDS/pdc-cds-infra) | PowerUser |
+| **4** | CloudFront real-time log config + cache behaviors | [pdc-cds-infra `terraform/cloudfront/pds-main/`](https://github.com/NASA-PDS/pdc-cds-infra) | Platform Engineer (`iam:PassRole`) |
 
 Each phase publishes its outputs to SSM; the next phase reads them at plan time. Exception: Phase 2b requires a one-time `aws ssm put-parameter` seed for `/pds/pdc-cds-infra/s3/pds-logs-bucket-arn` — see [`terraform/README.md`](terraform/README.md#phase-2b) for details.
 
