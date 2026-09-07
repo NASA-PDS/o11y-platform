@@ -155,6 +155,29 @@ The script checks that all three SSM parameters exist, that the domain is create
 
 ## Upgrade
 
+### State key rename (one-time)
+
+Live venues still store state at `observability/opensearch.tfstate`. This module pins `o11y-platform/opensearch.tfstate`. Copy the object **before** the first Terragrunt plan/apply on this branch; do not init against an empty new key.
+
+```bash
+VENUE=dev   # or test / prod
+BUCKET="pds-${VENUE}-infra"
+
+aws s3 cp \
+  "s3://${BUCKET}/observability/opensearch.tfstate" \
+  "s3://${BUCKET}/o11y-platform/opensearch.tfstate"
+
+# if the old backend used use_lockfile = true:
+aws s3 cp \
+  "s3://${BUCKET}/observability/opensearch.tfstate.tflock" \
+  "s3://${BUCKET}/o11y-platform/opensearch.tfstate.tflock" \
+  || true
+```
+
+If `cds-infra-deploy` Terragrunt `remote_state` also sets a key, change it to `o11y-platform/opensearch.tfstate` in the same move — Terragrunt-generated backends ignore this repo’s `backend.tf` key.
+
+Then run the normal Terragrunt plan from `cds-infra-deploy`. Confirm it wants **updates** (access policy, SG rules, SSM path rename), **not** `aws_opensearch_domain.this` create. Only then apply. Leave the old object until that apply succeeds; delete it afterward so nobody inits against it by mistake. Greenfield venues can skip this step.
+
 ### Engine version
 
 Update `engine_version` in the tfvars (e.g. `"OpenSearch_2.19"` → next version) and re-apply. AWS performs a blue/green upgrade — the domain stays up but enters "Processing" state for ~30 minutes. No downtime for consumers. Always pin the version explicitly; do not rely on the module default, which tracks the latest tested version.

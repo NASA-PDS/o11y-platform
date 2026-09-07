@@ -70,53 +70,56 @@ flowchart TD
         OS1["opensearch\nall *_enabled = false\n(~15-20 min)\npublishes endpoint → SSM"]
     end
 
-    subgraph p2a["Phase 2a — o11y-cloudfront-batch  🔐 Admin → 👤 Power User → 🔑 Platform Eng"]
+    subgraph p2a["Phase 2a — o11y-cloudfront-batch IAM  🔐 Admin"]
         BIAM["iam/policies  🔐 Admin\npublishes ec2_role_arn → SSM"]
-        BS3["s3  👤 Power User"]
-        BLS["logstash  🔑 Platform Eng\n(iam:PassRole to EC2 instance profile)"]
-        BIAM --> BS3 --> BLS
     end
 
     subgraph p2b["Phase 2b — o11y-cloudfront-streaming IAM  🔐 Admin"]
         CFIAM["iam/\npublishes firehose_role_arn,\nkinesis_stream_arn → SSM\n(Firehose backs up to pre-existing pds-logs-dev)"]
     end
 
-    subgraph p3["Phase 3 — pdc-cds-infra CloudFront  🔑 Platform Eng"]
+    subgraph p2c["Phase 2c — pdc-cds-infra CloudFront  🔑 Platform Eng"]
         CF["cloudfront/pds-main\n(iam:PassRole to CloudFront realtime log config)\nenable_o11y_batch=true, enable_o11y_streaming=true\nreads kinesis_stream_arn from SSM"]
     end
 
-    subgraph p4["Phase 4 — o11y-cloudfront-streaming/streaming + grant OpenSearch access  🔑 Platform Eng"]
+    subgraph p2d["Phase 2d — o11y-cloudfront-batch S3 + Logstash  👤 Power User → 🔑 Platform Eng"]
+        BS3["s3  👤 Power User"]
+        BLS["logstash  🔑 Platform Eng\n(iam:PassRole to EC2 instance profile)"]
+        BS3 --> BLS
+    end
+
+    subgraph p3["Phase 3 — o11y-cloudfront-streaming/streaming + grant OpenSearch access  🔑 Platform Eng"]
         CFMAIN["o11y-cloudfront-streaming/streaming  🔑 Platform Eng\n(iam:PassRole to Firehose + Lambda)\nfirehose + kinesis + lambda"]
         OS2["opensearch re-apply  👤 Power User\no11y_cloudfront_batch_enabled=true\no11y_cloudfront_streaming_enabled=true\n(access policy only — seconds)"]
     end
 
-    subgraph p5["Phase 5 — OpenSearch UI Application  👤 Power User (manual)"]
-        UI["Authorize VPC access (CLI)\nCreate application (console)\nAssociate domain\nGrant prod-en-platform-engineer as admin"]
+    subgraph p4["Phase 4 — OpenSearch UI Application  👤 Power User (manual)"]
+        UI["Authorize VPC access (CLI)\nCreate application (console)\nAssociate domain\nGrant ops IAM role as admin"]
     end
 
     OS1 -->|"endpoint, arn, SG id → SSM"| p2a
     OS1 -->|"endpoint, SG id → SSM"| p2b
     BIAM -->|"ec2_role_arn → SSM"| CF
     CFIAM -->|"kinesis_stream_arn → SSM"| CF
+    BIAM --> BS3
     CFIAM -->|"firehose_role_arn → SSM"| OS2
     BIAM -->|"ec2_role_arn → SSM"| OS2
     CF -->|"CloudFront now writing to Kinesis"| CFMAIN
     CFMAIN --> OS2
-    OS2 --> p5
+    OS2 --> p4
 ```
 
 1. **(1) Bootstrap OpenSearch** 👤 **Power User** — `task apply VENUE=dev COMPONENT=o11y-platform/opensearch` with all `*_enabled = false` (~15-20 min). Publishes endpoint, ARN, and SG ID to SSM. No IAM creation or role-passing at this phase.
 2. **(2a/2b) Deploy in parallel** — both can start immediately after Phase 1:
-   - **(2a) o11y-cloudfront-batch**: three sequential steps, each with a different access tier:
-     - `iam/policies` — 🔐 **Admin** (`iam:CreatePolicy`, `iam:AttachRolePolicy`; publishes `ec2_role_arn` to SSM)
-     - `s3` — 👤 **Power User** (creates `pds-dev-gh01dc-web-analytics` bucket)
-     - `logstash` — 🔑 **Platform Engineer** (`iam:PassRole` to EC2 instance profile)
+   - **(2a) o11y-cloudfront-batch `iam/policies`** — 🔐 **Admin** (`iam:CreatePolicy`, `iam:AttachRolePolicy`; publishes `ec2_role_arn` to SSM)
    - **(2b) o11y-cloudfront-streaming `iam/`** — 🔐 **Admin** (`iam:CreateRole` for Firehose/Lambda/CloudFront roles). Publishes `firehose_role_arn` and `kinesis_stream_arn` to SSM. Stop here — don't deploy `streaming/` yet.
-3. **(3) pdc-cds-infra CloudFront** — 🔑 **Platform Engineer** — deploy `cloudfront/pds-main` with `enable_o11y_batch = true` and `enable_o11y_streaming = true`. Requires `iam:PassRole` because `aws_cloudfront_realtime_log_config` accepts a `role_arn` for CloudFront→Kinesis delivery. Reads `ec2_role_arn` and `kinesis_stream_arn` from SSM.
-4. **(4) o11y-cloudfront-streaming/streaming + grant OpenSearch access** — 🔑 **Platform Engineer** / 👤 **Power User**:
+3. **(2c/2d) After 2a + 2b** — these can run in parallel with each other:
+   - **(2c) pdc-cds-infra CloudFront** — 🔑 **Platform Engineer** — deploy `cloudfront/pds-main` with `enable_o11y_batch = true` and `enable_o11y_streaming = true`. Requires `iam:PassRole` because `aws_cloudfront_realtime_log_config` accepts a `role_arn` for CloudFront→Kinesis delivery. Reads `ec2_role_arn` and `kinesis_stream_arn` from SSM.
+   - **(2d) o11y-cloudfront-batch S3 + Logstash** — 👤 **Power User** / 🔑 **Platform Engineer** — `s3` creates `pds-dev-gh01dc-web-analytics`; `logstash` needs `iam:PassRole` to the EC2 instance profile. Does not depend on CloudFront.
+4. **(3) o11y-cloudfront-streaming/streaming + grant OpenSearch access** — 🔑 **Platform Engineer** / 👤 **Power User**:
    - **o11y-cloudfront-streaming/streaming** — 🔑 **Platform Engineer** (`iam:PassRole` for `aws_kinesis_firehose_delivery_stream` and `aws_lambda_function`). Firehose reads from Kinesis → OpenSearch, backs up to `pds-logs-dev`.
    - **opensearch re-apply** — 👤 **Power User** — `task apply VENUE=dev COMPONENT=o11y-platform/opensearch` with `o11y_cloudfront_batch_enabled = true` and `o11y_cloudfront_streaming_enabled = true` set in the terragrunt inputs. Access-policy-only update, completes in seconds.
-5. **(5) OpenSearch UI Application** — 👤 **Power User** (manual) — see [OpenSearch UI Application](#opensearch-ui-application) for the full sequence. Grant `prod-en-platform-engineer` as the application admin.
+5. **(4) OpenSearch UI Application** — 👤 **Power User** (manual) — see [OpenSearch UI Application](#opensearch-ui-application) for the full sequence.
 
 **Two log buckets:**
 - **`pds-logs-dev`** — pre-existing, managed by pdc-cds-infra. Receives CloudFront standard access logs and Firehose S3 backups.
@@ -304,6 +307,6 @@ task destroy VENUE=dev COMPONENT=o11y-platform/opensearch   # destroys all index
 
 ## Architecture notes
 
-- **State** — S3 backend, key `o11y-platform/opensearch.tfstate`.
+- **State** — S3 backend, key `o11y-platform/opensearch.tfstate`. Existing venues still on `observability/opensearch.tfstate` must copy state before the first apply — see [State key rename](opensearch/README.md#state-key-rename-one-time).
 - **VPC/SG values** are Terragrunt inputs in `cds-infra-deploy`. TODO: source EC2 SG from SSM under `/pds/cds-infra/vpc/security_groups/` once MCP publishes it.
 - **Adding a new consumer** — publish its role ARN to SSM, add a `data "aws_ssm_parameter"` block in `opensearch/main.tf`, add the ARN to the access policy principals, and add an SG ingress rule if needed.
