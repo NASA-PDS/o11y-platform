@@ -145,7 +145,6 @@ variable "cicd" {
 variable "managedby" {
   type        = string
   description = "Tag value for owner managing the resource (e.g. PDS Team email distro)"
-  default     = "pdsoperator@jpl.nasa.gov"
 }
 
 variable "engine_version" {
