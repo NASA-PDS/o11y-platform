@@ -4,7 +4,7 @@ data "aws_caller_identity" "current" {}
 # see o11y_cloudfront_batch_enabled / o11y_cloudfront_streaming_enabled in variables.tf.
 data "aws_ssm_parameter" "ec2_role_arn" {
   count = var.o11y_cloudfront_batch_enabled ? 1 : 0
-  name  = "/pds/o11y-cloudfront-batch/iam/roles/ec2/instance-role-arn"
+  name  = "/pds/o11y-cloudfront-batch/iam/ec2_role_arn"
 }
 
 data "aws_ssm_parameter" "firehose_role_arn" {
@@ -19,7 +19,7 @@ data "aws_security_group" "mcp_ec2" {
 }
 
 data "aws_ssm_parameter" "firehose_security_group_id" {
-  count = var.o11y_cloudfront_streaming_enabled ? 1 : 0
+  count = var.vpc_enabled && var.o11y_cloudfront_streaming_enabled ? 1 : 0
   name  = "/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id"
 }
 

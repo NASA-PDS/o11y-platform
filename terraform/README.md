@@ -14,6 +14,7 @@ flowchart LR
     subgraph ssm_in["SSM inputs (read only when the matching *_enabled flag is true)"]
         EC2ARN["/pds/o11y-cloudfront-batch/iam/ec2_role_arn"]
         FHARN["/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn"]
+        FHSGID["/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id"]
     end
 
     POL["IAM Access Policy\n(resource-based, conditional —\nabsent until a consumer is enabled)"]
@@ -39,13 +40,13 @@ flowchart LR
     SSM_OUT -.->|"endpoint, reads at plan time"| LS
     SSM_OUT -.->|"endpoint, reads at plan time"| FH
     SSM_OUT -.->|"arn, reads at plan time"| WAIAM
-    SSM_OUT -.->|"security_group_id,\nreads at plan time"| FHSG
-    FHSG -->|"o11y-cloudfront-streaming manages this rule:\naws_vpc_security_group_ingress_rule"| SG
+    SSM_OUT -.->|"security_group_id,\nreads at plan time"| FHSGID
+    FHSGID -->|"Firehose SG ingress rule\n(if o11y_cloudfront_streaming_enabled)"| SG
     LS -->|"HTTPS"| SG
     FH -->|"HTTPS"| SG
 ```
 
-Network access is controlled by Security Group ingress rules (port 443). The EC2 SG rule lives here, since the MCP EC2 SG is pre-existing shared infra; the Firehose SG rule is instead created and owned by o11y-cloudfront-streaming itself, as a separate `aws_vpc_security_group_ingress_rule` resource targeting this repo's SG by ID (read from SSM) — this repo no longer takes a Firehose SG ID as an input. API access is controlled by an IAM resource-based policy whose principals are role ARNs read from SSM at plan time, gated by the `o11y_cloudfront_batch_enabled` / `o11y_cloudfront_streaming_enabled` flags (see [Access control](#access-control)) so the domain can bootstrap before any consumer exists. The domain's endpoint, ARN, and security group ID are published to SSM after deploy; consumers read them at Terraform plan time (dashed lines) with no shared state between repos.
+Network access is controlled by Security Group ingress rules (port 443). Both ingress rules live in this module: the EC2 SG rule (unconditional, since the MCP EC2 SG is pre-existing shared infra) and the Firehose SG rule (gated on `o11y_cloudfront_streaming_enabled && vpc_enabled`, reads the Firehose SG ID from SSM at plan time). API access is controlled by an IAM resource-based policy whose principals are role ARNs read from SSM at plan time, gated by the `o11y_cloudfront_batch_enabled` / `o11y_cloudfront_streaming_enabled` flags (see [Access control](#access-control)) so the domain can bootstrap before any consumer exists. The domain's endpoint, ARN, and security group ID are published to SSM after deploy; consumers read them at Terraform plan time (dashed lines) with no shared state between repos.
 
 **Ops access** is via the AWS-hosted [OpenSearch UI Application](#opensearch-ui-application) — not the built-in `/_dashboards` endpoint. See that section for setup steps.
 
@@ -235,6 +236,7 @@ Principals are read from SSM at plan time, each gated by a Terragrunt input flag
 |---|---|---|
 | `o11y_cloudfront_batch_enabled` | `/pds/o11y-cloudfront-batch/iam/ec2_role_arn` | o11y-cloudfront-batch `iam/policies` module |
 | `o11y_cloudfront_streaming_enabled` | `/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn` | o11y-cloudfront-streaming `iam/` module |
+| `o11y_cloudfront_streaming_enabled` + `vpc_enabled` | `/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id` | o11y-cloudfront-streaming `iam/` module |
 
 Both default to `false`. With both false, `aws_opensearch_domain_policy` isn't created at all — an access policy with an empty `Principal.AWS` is invalid. The flags are independent; flip each as soon as the matching consumer is ready. See [Deployment flow](#deployment-flow) for the full sequence.
 

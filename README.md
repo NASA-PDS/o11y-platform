@@ -56,7 +56,7 @@ All commands run from a checkout of `cds-infra-deploy` using: `task plan VENUE=<
 | **3** | Re-apply OpenSearch with both consumers enabled | [o11y-platform `terraform/opensearch/`](terraform/README.md) | PowerUser |
 | **4** | CloudFront real-time log config + cache behaviors | [pdc-cds-infra `terraform/cloudfront/pds-main/`](https://github.com/NASA-PDS/pdc-cds-infra) | PowerUser |
 
-Each phase publishes its outputs to SSM; the next phase reads them automatically at plan time — no manual parameter seeding needed.
+Each phase publishes its outputs to SSM; the next phase reads them at plan time. Exception: Phase 2b requires a one-time `aws ssm put-parameter` seed for `/pds/pdc-cds-infra/s3/pds-logs-bucket-arn` — see [`terraform/README.md`](terraform/README.md#phase-2b) for details.
 
 See [`terraform/README.md`](terraform/README.md) for full deploy and upgrade instructions.
 
