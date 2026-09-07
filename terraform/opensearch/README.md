@@ -1,6 +1,6 @@
 # OpenSearch Module
 
-Creates the shared OpenSearch domain for PDS observability and publishes its endpoint and ARN to SSM for downstream consumers (o11y-cloudfront-batch, o11y-cloudfront-streaming).
+Creates the shared OpenSearch domain for PDS observability and publishes its endpoint, ARN, and (when vpc_enabled = true) security group ID to SSM for downstream consumers (o11y-cloudfront-batch, o11y-cloudfront-streaming).
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

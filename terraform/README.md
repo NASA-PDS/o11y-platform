@@ -122,12 +122,13 @@ flowchart TD
 - **`pds-logs-dev`** — pre-existing, managed by pdc-cds-infra. Receives CloudFront standard access logs and Firehose S3 backups.
 - **`pds-dev-gh01dc-web-analytics`** — created by o11y-cloudfront-batch `s3`. Receives PDS node access logs read by Logstash.
 
-No manual URL values or `aws ssm put-parameter` seeding required — everything is SSM-driven via `*_enabled` flags.
+No manual URL values. First-time deploys need a one-time `aws ssm put-parameter` seed of `/pds/pdc-cds-infra/s3/pds-logs-bucket-arn` before Phase 2b; `pdc-cds-infra` CloudFront takes ownership of that parameter in Phase 2c. Consumer enablement is SSM-driven via `*_enabled` flags.
 
 ---
 
 ## Prerequisites
 
+- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.10.0
 - [Terragrunt](https://terragrunt.gruntwork.io/docs/getting-started/install/) >= 0.55
 - [Task](https://taskfile.dev) — `brew install go-task/tap/go-task`
 - A local checkout of `cds-infra-deploy` — all Terragrunt inputs (vpc_id, subnet IDs, feature flags, etc.) live there as `venues/<venue>/o11y-platform/opensearch/terragrunt.hcl`
