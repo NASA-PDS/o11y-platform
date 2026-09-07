@@ -1,15 +1,10 @@
-# Backend configuration for S3 state storage
-# The key is pinned here; all other values are supplied at init time via -backend-config.
+# Backend configuration for S3 state storage.
+# The key is pinned here. Bucket, region, and lock settings are supplied at
+# init time — by Terragrunt in cds-infra-deploy for real deploys, or by
+# -backend-config flags in terraform/Taskfile.yaml for local Task fallback.
 #
-# Usage:
-#   terraform init -backend-config=backend-<venue>.hcl
-#
-# Example backend-<venue>.hcl content:
-#   bucket         = "pds-<venue>-infra"
-#   region         = "us-west-2"
-#   dynamodb_table = "terraform-state-lock"
-#   encrypt        = true
-#   profile        = "your-aws-profile"
+# Do not add backend-*.hcl files in this module; they were removed when this
+# repo switched to Terragrunt.
 
 terraform {
   backend "s3" {

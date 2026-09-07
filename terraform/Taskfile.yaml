@@ -11,6 +11,10 @@
 #   brew install go-task/tap/go-task
 #   Run `task auth` and follow the instructions to export SSO credentials.
 #
+# Primary deploys use Terragrunt from cds-infra-deploy (backend + inputs).
+# This Taskfile is a local fallback. Init supplies S3 backend settings as
+# -backend-config flags (no backend-*.hcl files in this repo).
+#
 # tfvars:
 #   By default, tfvars are read from a local cds-infra-deploy checkout:
 #     export CDS_INFRA_DEPLOY_DIR=/path/to/cds-infra-deploy
@@ -60,7 +64,7 @@ tasks:
                 - name: VENUE
                   enum: [dev, test, prod]
         cmds:
-            - terraform init -no-color -reconfigure -backend-config=backend-{{.VENUE}}.hcl {{.CLI_ARGS}}
+            - terraform init -no-color -reconfigure -backend-config="bucket=pds-{{.VENUE}}-infra" -backend-config="region=us-west-2" -backend-config="encrypt=true" -backend-config="use_lockfile=true" {{.CLI_ARGS}}
 
     opensearch:validate:
         desc: "Validate OpenSearch domain Terraform files"

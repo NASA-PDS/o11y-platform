@@ -5,7 +5,8 @@
 # Usage:
 #   bash scripts/smoke-test.sh <dev|test|prod>
 #
-# Requires exported AWS credentials (not AWS_PROFILE — use eval $(aws configure export-credentials ...)):
+# Requires python3 (parses AWS CLI JSON) and exported AWS credentials
+# (not AWS_PROFILE — use eval $(aws configure export-credentials ...)):
 #   eval $(aws configure export-credentials --profile <your-profile> --format env)
 #   unset AWS_PROFILE
 #   bash scripts/smoke-test.sh dev

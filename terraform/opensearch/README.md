@@ -126,7 +126,9 @@ Run this manually after every `opensearch:deploy` that creates a new domain
 to SSM directly, so it's pulled from the domain ARN:
 
 ```bash
-export AWS_PROFILE=<your-profile>
+# Same exported credentials as the Terraform steps above (AWS_PROFILE unset).
+# If you need a profile for this one-off CLI call, pass --profile <your-profile>
+# on each aws command instead of exporting AWS_PROFILE.
 
 DOMAIN_NAME=$(aws ssm get-parameter \
   --name /pds/o11y-platform/opensearch/opensearch_arn \
