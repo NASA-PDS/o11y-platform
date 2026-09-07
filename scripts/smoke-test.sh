@@ -1,6 +1,6 @@
 #!/bin/bash
-# smoke-test.sh — Verify o11y-platform OpenSearch deployment: SSM outputs, domain health, SG.
-# Run from any workstation with AWS credentials exported and VPC access to the domain.
+# smoke-test.sh — Verify o11y-platform OpenSearch deployment: SSM outputs, domain status, cluster health.
+# Run from any workstation with AWS credentials exported. No VPC access required.
 #
 # Usage:
 #   bash scripts/smoke-test.sh <dev|test|prod>
@@ -64,30 +64,61 @@ else
 fi
 
 echo ""
+echo "== OpenSearch domain status =="
+
+if [[ -z "$ARN" ]]; then
+  echo "  SKIP  (no ARN from SSM)"
+else
+  DOMAIN_NAME=$(echo "$ARN" | sed 's|.*/domain/||')
+
+  DOMAIN_JSON=$(aws opensearch describe-domain \
+    --domain-name "$DOMAIN_NAME" --region "$REGION" \
+    --query "DomainStatus" --output json 2>/dev/null || true)
+
+  if [[ -z "$DOMAIN_JSON" ]]; then
+    fail "describe-domain: domain $DOMAIN_NAME not found"
+  else
+    CREATED=$(echo "$DOMAIN_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['Created'])" 2>/dev/null || echo "false")
+    PROCESSING=$(echo "$DOMAIN_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['Processing'])" 2>/dev/null || echo "true")
+
+    if [[ "$CREATED" == "True" ]]; then
+      pass "domain created: $DOMAIN_NAME"
+    else
+      fail "domain not yet created: $DOMAIN_NAME"
+    fi
+
+    if [[ "$PROCESSING" == "False" ]]; then
+      pass "domain not processing (stable)"
+    else
+      fail "domain is currently processing (mid-update or still provisioning)"
+    fi
+  fi
+fi
+
+echo ""
 echo "== OpenSearch cluster health =="
 
-if [[ -z "$ENDPOINT" ]]; then
-  echo "  SKIP  (no endpoint from SSM)"
+if [[ -z "$ARN" ]]; then
+  echo "  SKIP  (no ARN from SSM)"
 else
-  RESPONSE=$(curl -s -w "\n%{http_code}" \
-    --aws-sigv4 "aws:amz:${REGION}:es" \
-    --user "${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID not set}:${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY not set}" \
-    -H "x-amz-security-token: ${AWS_SESSION_TOKEN:-}" \
-    "https://${ENDPOINT}/_cluster/health?pretty" 2>/dev/null || true)
+  DOMAIN_NAME=$(echo "$ARN" | sed 's|.*/domain/||')
 
-  HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-  BODY=$(echo "$RESPONSE" | head -n -1)
+  HEALTH_JSON=$(aws opensearch describe-domain-health \
+    --domain-name "$DOMAIN_NAME" --region "$REGION" \
+    --output json 2>/dev/null || true)
 
-  if [[ "$HTTP_CODE" == "200" ]]; then
-    STATUS=$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['status'])" "$BODY" 2>/dev/null || echo "unknown")
-    NODES=$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['number_of_nodes'])" "$BODY" 2>/dev/null || echo "?")
-    if [[ "$STATUS" == "green" || "$STATUS" == "yellow" ]]; then
-      pass "cluster health: status=$STATUS nodes=$NODES"
-    else
-      fail "cluster health: status=$STATUS nodes=$NODES (expected green or yellow)"
-    fi
+  if [[ -z "$HEALTH_JSON" ]]; then
+    fail "describe-domain-health: no response for $DOMAIN_NAME"
   else
-    fail "cluster health: HTTP $HTTP_CODE (expected 200 — verify VPC access and credentials)"
+    HEALTH=$(echo "$HEALTH_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['HealthStatus'])" 2>/dev/null || echo "Unknown")
+    NODES=$(echo "$HEALTH_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['DataNodeCount'])" 2>/dev/null || echo "?")
+    UNASSIGNED=$(echo "$HEALTH_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['TotalUnAssignedShards'])" 2>/dev/null || echo "?")
+
+    if [[ "$HEALTH" == "Green" || "$HEALTH" == "Yellow" ]]; then
+      pass "cluster health: status=$HEALTH nodes=$NODES unassigned_shards=$UNASSIGNED"
+    else
+      fail "cluster health: status=$HEALTH nodes=$NODES unassigned_shards=$UNASSIGNED (expected Green or Yellow)"
+    fi
   fi
 fi
 
