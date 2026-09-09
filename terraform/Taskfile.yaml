@@ -1,15 +1,19 @@
-# Taskfile for pdc-observability Terraform
+# Taskfile for o11y-platform Terraform
 # ==========================================
 #
 # Modules:
 #   opensearch/  - Shared OpenSearch domain (~15-20 min to create)
 #
 # Consumers connect via SSM:
-#   /pds/observability/opensearch/opensearch_endpoint
+#   /pds/o11y-platform/opensearch/opensearch_endpoint
 #
 # Prerequisites:
 #   brew install go-task/tap/go-task
 #   Run `task auth` and follow the instructions to export SSO credentials.
+#
+# Primary deploys use Terragrunt from cds-infra-deploy (backend + inputs).
+# This Taskfile is a local fallback. Init supplies S3 backend settings as
+# -backend-config flags (no backend-*.hcl files in this repo).
 #
 # tfvars:
 #   By default, tfvars are read from a local cds-infra-deploy checkout:
@@ -60,7 +64,7 @@ tasks:
                 - name: VENUE
                   enum: [dev, test, prod]
         cmds:
-            - terraform init -no-color -reconfigure -backend-config=backend-{{.VENUE}}.hcl {{.CLI_ARGS}}
+            - terraform init -no-color -reconfigure -backend-config="bucket=pds-{{.VENUE}}-infra" -backend-config="region=us-west-2" -backend-config="encrypt=true" -backend-config="use_lockfile=true" {{.CLI_ARGS}}
 
     opensearch:validate:
         desc: "Validate OpenSearch domain Terraform files"
@@ -82,7 +86,7 @@ tasks:
                     if [ "{{.LOCAL}}" = "1" ]; then
                         echo "tfvars/{{.VENUE}}.tfvars"
                     elif [ -n "$CDS_INFRA_DEPLOY_DIR" ]; then
-                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/observability/opensearch.tfvars"
+                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/o11y-platform/opensearch.tfvars"
                     else
                         echo "Set CDS_INFRA_DEPLOY_DIR (path to a cds-infra-deploy checkout) or pass LOCAL=1 to use this repo's local tfvars/ dir." >&2
                         exit 1
@@ -105,7 +109,7 @@ tasks:
                     if [ "{{.LOCAL}}" = "1" ]; then
                         echo "tfvars/{{.VENUE}}.tfvars"
                     elif [ -n "$CDS_INFRA_DEPLOY_DIR" ]; then
-                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/observability/opensearch.tfvars"
+                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/o11y-platform/opensearch.tfvars"
                     else
                         echo "Set CDS_INFRA_DEPLOY_DIR (path to a cds-infra-deploy checkout) or pass LOCAL=1 to use this repo's local tfvars/ dir." >&2
                         exit 1
@@ -127,7 +131,7 @@ tasks:
                     if [ "{{.LOCAL}}" = "1" ]; then
                         echo "tfvars/{{.VENUE}}.tfvars"
                     elif [ -n "$CDS_INFRA_DEPLOY_DIR" ]; then
-                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/observability/opensearch.tfvars"
+                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/o11y-platform/opensearch.tfvars"
                     else
                         echo "Set CDS_INFRA_DEPLOY_DIR (path to a cds-infra-deploy checkout) or pass LOCAL=1 to use this repo's local tfvars/ dir." >&2
                         exit 1
@@ -149,7 +153,7 @@ tasks:
                     if [ "{{.LOCAL}}" = "1" ]; then
                         echo "tfvars/{{.VENUE}}.tfvars"
                     elif [ -n "$CDS_INFRA_DEPLOY_DIR" ]; then
-                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/observability/opensearch.tfvars"
+                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/o11y-platform/opensearch.tfvars"
                     else
                         echo "Set CDS_INFRA_DEPLOY_DIR (path to a cds-infra-deploy checkout) or pass LOCAL=1 to use this repo's local tfvars/ dir." >&2
                         exit 1
@@ -171,7 +175,7 @@ tasks:
                     if [ "{{.LOCAL}}" = "1" ]; then
                         echo "tfvars/{{.VENUE}}.tfvars"
                     elif [ -n "$CDS_INFRA_DEPLOY_DIR" ]; then
-                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/observability/opensearch.tfvars"
+                        echo "$CDS_INFRA_DEPLOY_DIR/venues/{{.VENUE}}/o11y-platform/opensearch.tfvars"
                     else
                         echo "Set CDS_INFRA_DEPLOY_DIR (path to a cds-infra-deploy checkout) or pass LOCAL=1 to use this repo's local tfvars/ dir." >&2
                         exit 1
@@ -196,7 +200,7 @@ tasks:
         cmds:
             - |
               aws ssm get-parameter \
-                --name /pds/observability/opensearch/opensearch_endpoint \
+                --name /pds/o11y-platform/opensearch/opensearch_endpoint \
                 --query Parameter.Value \
                 --output text
 
