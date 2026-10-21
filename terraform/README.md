@@ -235,6 +235,13 @@ task plan  VENUE=dev COMPONENT=o11y-cloudfront-batch/logstash
 task apply VENUE=dev COMPONENT=o11y-cloudfront-batch/logstash
 ```
 
+**Verify:** `apply` only creates the EC2; Logstash is deployed and checked on the instance.
+Connect through the bastion as `pdsops` ([Access model](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#access-model)),
+deploy, then run the checks in
+[Verify the deployment](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#verify-the-deployment)
+(`scripts/smoke-test.sh`). Pipeline changes are tested before deploy with the suite in
+[`tests/README.md`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md).
+
 ### Phase 3 — o11y-cloudfront-streaming/streaming + re-enable OpenSearch consumers
 
 ```bash
