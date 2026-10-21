@@ -23,7 +23,7 @@ flowchart LR
     subgraph wa["o11y-cloudfront-batch"]
         LS["Logstash EC2"]
         EC2SG["EC2 Security Group\n(pre-existing MCP infra)"]
-        WAIAM["iam/policies"]
+        WAIAM["iam"]
     end
 
     subgraph cf["o11y-cloudfront-streaming"]
@@ -71,7 +71,7 @@ flowchart TD
     end
 
     subgraph p2a["Phase 2a — o11y-cloudfront-batch IAM  🔐 Admin"]
-        BIAM["iam/policies  🔐 Admin\npublishes ec2_role_arn → SSM"]
+        BIAM["iam  🔐 Admin\nEC2 role + access policy\npublishes ec2_role_arn → SSM"]
     end
 
     subgraph p2b["Phase 2b — o11y-cloudfront-streaming IAM  🔐 Admin"]
@@ -111,7 +111,7 @@ flowchart TD
 
 1. **(1) Bootstrap OpenSearch** 👤 **Power User** — `task apply VENUE=dev COMPONENT=o11y-platform/opensearch` with all `*_enabled = false` (~15-20 min). Publishes endpoint, ARN, and SG ID to SSM. No IAM creation or role-passing at this phase.
 2. **(2a/2b) Deploy in parallel** — both can start immediately after Phase 1:
-   - **(2a) o11y-cloudfront-batch `iam/policies`** — 🔐 **Admin** (`iam:CreatePolicy`, `iam:AttachRolePolicy`; publishes `ec2_role_arn` to SSM)
+   - **(2a) o11y-cloudfront-batch `iam`** — 🔐 **Admin** (`iam:CreateRole`, `iam:CreatePolicy`, `iam:AttachRolePolicy`; one apply creates the EC2 role and its access policy and publishes `ec2_role_arn` to SSM)
    - **(2b) o11y-cloudfront-streaming `iam/`** — 🔐 **Admin** (`iam:CreateRole` for Firehose/Lambda/CloudFront roles). Publishes `firehose_role_arn` and `kinesis_stream_arn` to SSM. Stop here — don't deploy `streaming/` yet.
 3. **(2c/2d) After 2a + 2b** — these can run in parallel with each other:
    - **(2c) pdc-cds-infra CloudFront** — 🔑 **Platform Engineer** — deploy `cloudfront/pds-main` with `enable_o11y_batch = true` and `enable_o11y_streaming = true`. Requires `iam:PassRole` because `aws_cloudfront_realtime_log_config` accepts a `role_arn` for CloudFront→Kinesis delivery. Reads `ec2_role_arn` and `kinesis_stream_arn` from SSM.
@@ -151,6 +151,17 @@ All commands below run from a checkout of `cds-infra-deploy`. Replace `dev` with
 
 ### Phase 1 — Bootstrap OpenSearch 👤 Power User (~15-20 min)
 
+Before planning, confirm `o11y_cloudfront_batch_enabled` and `o11y_cloudfront_streaming_enabled` are both `false` (or unset, which defaults to `false`) in `venues/<venue>/o11y-platform/opensearch/terragrunt.hcl`. The consumer role ARNs don't exist in SSM yet, so enabling either flag now fails the plan.
+
+```bash
+VENUE=dev   # set to your target venue
+
+grep -nE 'o11y_cloudfront_(batch|streaming)_enabled' \
+  "venues/${VENUE}/o11y-platform/opensearch/terragrunt.hcl"
+```
+
+Then deploy:
+
 ```bash
 task plan  VENUE=dev COMPONENT=o11y-platform/opensearch
 task apply VENUE=dev COMPONENT=o11y-platform/opensearch
@@ -161,11 +172,11 @@ Publishes endpoint, ARN, and SG ID to SSM — no consumers enabled yet.
 ### Phase 2a — o11y-cloudfront-batch IAM 🔐 Admin
 
 ```bash
-task plan  VENUE=dev COMPONENT=o11y-cloudfront-batch/iam/policies
-task apply VENUE=dev COMPONENT=o11y-cloudfront-batch/iam/policies
+task plan  VENUE=dev COMPONENT=o11y-cloudfront-batch/iam
+task apply VENUE=dev COMPONENT=o11y-cloudfront-batch/iam
 ```
 
-Publishes `ec2_role_arn` to SSM.
+Creates the EC2 role and instance profile and the S3/OpenSearch access policy attached to the role, in one apply. Publishes `ec2_role_arn` to SSM.
 
 ### Phase 2b — o11y-cloudfront-streaming IAM 🔐 Admin (parallel with 2a)
 
@@ -193,6 +204,17 @@ Publishes `firehose_role_arn` and `kinesis_stream_arn` to SSM. Stop here — do 
 ### Phase 2c — pdc-cds-infra CloudFront 🔑 Platform Engineer (after 2a + 2b complete)
 
 Reads `ec2_role_arn` (from 2a) and `kinesis_stream_arn` (from 2b). Also takes ownership of the `pds-logs-bucket-arn` SSM param seeded above.
+
+Before planning, confirm `enable_o11y_batch` and `enable_o11y_streaming` are both `true` in `venues/<venue>/pdc-cds-infra/cloudfront/pds-main/terragrunt.hcl`. They are `false` in test and prod until set, and while they are `false` CloudFront does not send logs to o11y.
+
+```bash
+VENUE=dev   # set to your target venue
+
+grep -nE 'enable_o11y_(batch|streaming)' \
+  "venues/${VENUE}/pdc-cds-infra/cloudfront/pds-main/terragrunt.hcl"
+```
+
+Then deploy:
 
 ```bash
 task plan  VENUE=dev COMPONENT=pdc-cds-infra/cloudfront/pds-main
@@ -238,7 +260,7 @@ Principals are read from SSM at plan time, each gated by a Terragrunt input flag
 
 | Terragrunt input flag | SSM path (read only when flag is `true`) | Published by |
 |---|---|---|
-| `o11y_cloudfront_batch_enabled` | `/pds/o11y-cloudfront-batch/iam/ec2_role_arn` | o11y-cloudfront-batch `iam/policies` module |
+| `o11y_cloudfront_batch_enabled` | `/pds/o11y-cloudfront-batch/iam/ec2_role_arn` | o11y-cloudfront-batch `iam` module |
 | `o11y_cloudfront_streaming_enabled` | `/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn` | o11y-cloudfront-streaming `iam/` module |
 | `o11y_cloudfront_streaming_enabled` + `vpc_enabled` | `/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id` | o11y-cloudfront-streaming `iam/` module |
 
