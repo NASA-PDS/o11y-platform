@@ -70,10 +70,10 @@ terraform/
   │   ├── provider.tf              # default_tags: tenant/venue/component/managedby/cicd
   │   ├── backend.tf               # S3 backend key (pinned; bucket/region from Terragrunt)
   │   └── tfvars/
-  │       ├── dev.tfvars.example   # Template — copy to <venue>.tfvars (gitignored) for LOCAL=1
+  │       ├── dev.tfvars.example   # Reference inputs for standalone Terraform only (not the operational path)
   │       ├── test.tfvars.example
   │       └── prod.tfvars.example
-  ├── Taskfile.yaml                # Local fallback runner for opensearch:* commands
+  ├── Taskfile.yaml                # Standalone Terraform runner for opensearch:* commands (not the operational path)
   └── .taskrc.yaml                 # interactive: true (enables VENUE enum prompting)
 ```
 
@@ -83,12 +83,12 @@ There are no `backend-*.hcl` files in this repo. Real deploys get bucket/region/
 
 Primary path: set Terragrunt inputs in `cds-infra-deploy` (`venues/<venue>/o11y-platform/opensearch/terragrunt.hcl`). Leave `o11y_cloudfront_batch_enabled` / `o11y_cloudfront_streaming_enabled` false for a first deploy — see Key design decisions for the flip sequence.
 
-Local Task fallback (iteration only):
+Standalone Terraform (reference only; dev, test, and prod are always deployed with Terragrunt):
 
 ```bash
 cd terraform/
 cp opensearch/tfvars/dev.tfvars.example opensearch/tfvars/dev.tfvars
-# Edit dev.tfvars: set domain_name, vpc_id, vpc_subnet_ids, ec2_security_group_name
+# Edit dev.tfvars (gitignored): set domain_name, vpc_id, vpc_subnet_ids
 ```
 
 ### Deployment commands
@@ -102,19 +102,19 @@ task apply   VENUE=dev COMPONENT=o11y-platform/opensearch   # ~15-20 min for dom
 task destroy VENUE=dev COMPONENT=o11y-platform/opensearch   # destroys all indexed data — irreversible
 ```
 
-Local Task fallback (this repo; `LOCAL=1` uses gitignored tfvars):
+Standalone Terraform (this repo; reads the gitignored `opensearch/tfvars/<venue>.tfvars`; not used for operational deployments):
 
 ```bash
 cd terraform/
-task opensearch:init      VENUE=dev LOCAL=1
+task opensearch:init      VENUE=dev
 task opensearch:validate
-task opensearch:plan      VENUE=dev LOCAL=1
-task opensearch:deploy    VENUE=dev LOCAL=1
+task opensearch:plan      VENUE=dev
+task opensearch:deploy    VENUE=dev
 task opensearch:endpoint
-task opensearch:refresh   VENUE=dev LOCAL=1
-task opensearch:sync      VENUE=dev LOCAL=1
+task opensearch:refresh   VENUE=dev
+task opensearch:sync      VENUE=dev
 task opensearch:show      VENUE=dev
-task opensearch:destroy   VENUE=dev LOCAL=1
+task opensearch:destroy   VENUE=dev
 ```
 
 `VENUE` must be one of `dev`, `test`, `prod` (enforced by Task via `.taskrc.yaml` interactive enum prompting if omitted). Run `task --list` from `terraform/` to see the full local command list.
@@ -124,8 +124,8 @@ CI (`.github/workflows/terraform_cicd.yaml`) currently only runs `terraform fmt`
 ### Key design decisions
 
 - **SSM decoupling** — the OpenSearch endpoint, domain ARN, and security group ID are published to `/pds/o11y-platform/opensearch/opensearch_endpoint`, `/pds/o11y-platform/opensearch/opensearch_arn`, and `/pds/o11y-platform/opensearch/opensearch_security_group_id` after deploy. Consumers read these at plan time (the ARN is consumed by o11y-cloudfront-batch's `iam` module to scope IAM permissions); no shared Terraform state or cross-repo module references.
-- **Access policy via `*_enabled` flags, not manual SSM seeding** — EC2 and Firehose role ARNs are read from SSM at plan time (`/pds/o11y-cloudfront-batch/iam/ec2_role_arn`, `/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn`), but each lookup — and its entry in the access policy's `Principal.AWS` — is gated behind `o11y_cloudfront_batch_enabled` / `o11y_cloudfront_streaming_enabled` (both default `false`). This lets the domain bootstrap before either consumer exists: deploy with both false, deploy the consumers (each reads the domain's SSM outputs immediately), then flip the relevant flag to `true` and re-apply here — an access-policy-only update, no domain redeployment. `aws_opensearch_domain_policy` isn't created at all while both flags are false. See `terraform/README.md#deployment-flow` for the full sequence.
-- **VPC-only** — no public endpoint. OpenSearch is accessible only from within the VPC via security group rules (`aws_security_group.opensearch`, created only when `vpc_enabled = true`). Both ingress rules live in this module: the EC2 rule (unconditional; MCP EC2 SG is pre-existing shared infra) and the Firehose rule (gated on `o11y_cloudfront_streaming_enabled && vpc_enabled`; reads the Firehose SG ID from SSM at plan time).
+- **Access policy via `*_enabled` flags, not manual SSM seeding** — EC2 and Firehose role ARNs are read from SSM at plan time (`/pds/o11y-cloudfront-batch/iam/roles/ec2/instance-role-arn`, `/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn`), as are the Logstash and Firehose security group IDs (`/pds/o11y-cloudfront-batch/ec2/logstash_security_group_id`, `/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id`), but each lookup — and its entry in the access policy's `Principal.AWS` — is gated behind `o11y_cloudfront_batch_enabled` / `o11y_cloudfront_streaming_enabled` (both default `false`). This lets the domain bootstrap before either consumer exists: deploy with both false, deploy the consumers (each reads the domain's SSM outputs immediately), then flip the relevant flag to `true` and re-apply here (so `opensearch` is always applied twice) — an access-policy and ingress-rule update only, no domain redeployment. Enabling a flag before its consumer has published those SSM parameters fails the plan. `aws_opensearch_domain_policy` isn't created at all while both flags are false. See `terraform/README.md#deployment-flow` for the full sequence.
+- **VPC-only** — no public endpoint. OpenSearch is accessible only from within the VPC via security group rules (`aws_security_group.opensearch`, created only when `vpc_enabled = true`). Both ingress rules live in this module: the Logstash rule (gated on `o11y_cloudfront_batch_enabled && vpc_enabled`; reads the Logstash SG ID from SSM at plan time) and the Firehose rule (gated on `o11y_cloudfront_streaming_enabled && vpc_enabled`; reads the Firehose SG ID from SSM at plan time).
 - **`lifecycle { ignore_changes = [tags] }`** on the OpenSearch SG — suppresses drift from AWS Config auto-tagging.
 - **State** — S3 backend, key `o11y-platform/opensearch.tfstate`. Bucket/region/lock come from Terragrunt in `cds-infra-deploy`, not from `backend-*.hcl` files in this repo.
 - **dev vs prod sizing** — dev uses single-node, no dedicated masters, no zone awareness (`t3.medium.search`); prod-like venues should enable `dedicated_master_enabled` and `zone_awareness_enabled` with matching subnet/AZ counts.

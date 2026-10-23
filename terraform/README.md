@@ -12,7 +12,8 @@ flowchart LR
     end
 
     subgraph ssm_in["SSM inputs (read only when the matching *_enabled flag is true)"]
-        EC2ARN["/pds/o11y-cloudfront-batch/iam/ec2_role_arn"]
+        EC2ARN["/pds/o11y-cloudfront-batch/iam/roles/ec2/instance-role-arn"]
+        LSSGID["/pds/o11y-cloudfront-batch/ec2/logstash_security_group_id"]
         FHARN["/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn"]
         FHSGID["/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id"]
     end
@@ -22,7 +23,7 @@ flowchart LR
 
     subgraph wa["o11y-cloudfront-batch"]
         LS["Logstash EC2"]
-        EC2SG["EC2 Security Group\n(pre-existing MCP infra)"]
+        LSSG["Logstash Security Group\n(created by logstash)"]
         WAIAM["iam"]
     end
 
@@ -31,7 +32,8 @@ flowchart LR
         FHSG["Firehose Security Group"]
     end
 
-    EC2SG -->|"SG ingress rule\n(unconditional)"| SG
+    LSSG -->|"publishes SG id"| LSSGID
+    LSSGID -->|"Logstash SG ingress rule\n(if o11y_cloudfront_batch_enabled)"| SG
     SG --> OS
     EC2ARN -->|"IAM principal,\nif o11y_cloudfront_batch_enabled"| POL
     FHARN -->|"IAM principal,\nif o11y_cloudfront_streaming_enabled"| POL
@@ -46,7 +48,7 @@ flowchart LR
     FH -->|"HTTPS"| SG
 ```
 
-Network access is controlled by Security Group ingress rules (port 443). Both ingress rules live in this module: the EC2 SG rule (unconditional, since the MCP EC2 SG is pre-existing shared infra) and the Firehose SG rule (gated on `o11y_cloudfront_streaming_enabled && vpc_enabled`, reads the Firehose SG ID from SSM at plan time). API access is controlled by an IAM resource-based policy whose principals are role ARNs read from SSM at plan time, gated by the `o11y_cloudfront_batch_enabled` / `o11y_cloudfront_streaming_enabled` flags (see [Access control](#access-control)) so the domain can bootstrap before any consumer exists. The domain's endpoint, ARN, and security group ID are published to SSM after deploy; consumers read them at Terraform plan time (dashed lines) with no shared state between repos.
+Network access is controlled by Security Group ingress rules (port 443). Both ingress rules live in this module, and each consumer's security group is read from SSM at plan time: the Logstash SG rule (gated on `o11y_cloudfront_batch_enabled && vpc_enabled`) and the Firehose SG rule (gated on `o11y_cloudfront_streaming_enabled && vpc_enabled`). API access is controlled by an IAM resource-based policy whose principals are role ARNs read from SSM at plan time, gated by the `o11y_cloudfront_batch_enabled` / `o11y_cloudfront_streaming_enabled` flags (see [Access control](#access-control)) so the domain can bootstrap before any consumer exists. The domain's endpoint, ARN, and security group ID are published to SSM after deploy; consumers read them at Terraform plan time (dashed lines) with no shared state between repos.
 
 **Ops access** is via the AWS-hosted [OpenSearch UI Application](#opensearch-ui-application) — not the built-in `/_dashboards` endpoint. See that section for setup steps.
 
@@ -64,6 +66,17 @@ Three access tiers are used across the full deployment. A given principal must h
 
 ## Deployment flow
 
+> **`opensearch` is always applied twice.** The first apply (Phase 1) creates the domain with every `*_enabled` flag `false`, because the consumers don't exist yet. Each consumer then reads the domain's endpoint, ARN, and security group ID from SSM and publishes its own role ARN and security group ID. The second apply sets the flags to `true` and reads those values to build the access policy and the VPC ingress rules. It is an access-policy and ingress-rule update only; the domain isn't redeployed.
+>
+> Enabling a flag before the consumer has published its SSM parameters fails the plan, so the order is fixed:
+>
+> | Flag | Must already be applied | SSM parameters it reads |
+> |---|---|---|
+> | `o11y_cloudfront_batch_enabled` | o11y-cloudfront-batch `iam` (2a) **and** `logstash` (2d) | `/pds/o11y-cloudfront-batch/iam/roles/ec2/instance-role-arn`, `/pds/o11y-cloudfront-batch/ec2/logstash_security_group_id` |
+> | `o11y_cloudfront_streaming_enabled` | o11y-cloudfront-streaming `iam/` (2b) and `streaming/` (3) | `/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn`, `/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id` |
+>
+> Until its flag is on, a consumer has neither an access-policy entry nor a security group ingress rule, so it cannot reach the domain (Logstash gets connection timeouts or 403s). The two flags are independent; flip each as soon as its consumer's modules have been applied.
+
 ```mermaid
 flowchart TD
     subgraph p1["Phase 1 — bootstrap OpenSearch  👤 Power User"]
@@ -71,7 +84,7 @@ flowchart TD
     end
 
     subgraph p2a["Phase 2a — o11y-cloudfront-batch IAM  🔐 Admin"]
-        BIAM["iam  🔐 Admin\nEC2 role + access policy\npublishes ec2_role_arn → SSM"]
+        BIAM["iam  🔐 Admin\nEC2 role + access policy\npublishes instance-role-arn → SSM"]
     end
 
     subgraph p2b["Phase 2b — o11y-cloudfront-streaming IAM  🔐 Admin"]
@@ -84,7 +97,7 @@ flowchart TD
 
     subgraph p2d["Phase 2d — o11y-cloudfront-batch S3 + Logstash  👤 Power User → 🔑 Platform Eng"]
         BS3["s3  👤 Power User"]
-        BLS["logstash  🔑 Platform Eng\n(iam:PassRole to EC2 instance profile)"]
+        BLS["logstash  🔑 Platform Eng\n(iam:PassRole to EC2 instance profile)\npublishes logstash_security_group_id → SSM"]
         BS3 --> BLS
     end
 
@@ -99,11 +112,12 @@ flowchart TD
 
     OS1 -->|"endpoint, arn, SG id → SSM"| p2a
     OS1 -->|"endpoint, SG id → SSM"| p2b
-    BIAM -->|"ec2_role_arn → SSM"| CF
+    BIAM -->|"instance-role-arn → SSM"| CF
     CFIAM -->|"kinesis_stream_arn → SSM"| CF
     BIAM --> BS3
     CFIAM -->|"firehose_role_arn → SSM"| OS2
-    BIAM -->|"ec2_role_arn → SSM"| OS2
+    BIAM -->|"instance-role-arn → SSM"| OS2
+    BLS -->|"logstash_security_group_id → SSM"| OS2
     CF -->|"CloudFront now writing to Kinesis"| CFMAIN
     CFMAIN --> OS2
     OS2 --> p4
@@ -111,14 +125,14 @@ flowchart TD
 
 1. **(1) Bootstrap OpenSearch** 👤 **Power User** — `task apply VENUE=dev COMPONENT=o11y-platform/opensearch` with all `*_enabled = false` (~15-20 min). Publishes endpoint, ARN, and SG ID to SSM. No IAM creation or role-passing at this phase.
 2. **(2a/2b) Deploy in parallel** — both can start immediately after Phase 1:
-   - **(2a) o11y-cloudfront-batch `iam`** — 🔐 **Admin** (`iam:CreateRole`, `iam:CreatePolicy`, `iam:AttachRolePolicy`; one apply creates the EC2 role and its access policy and publishes `ec2_role_arn` to SSM)
+   - **(2a) o11y-cloudfront-batch `iam`** — 🔐 **Admin** (`iam:CreateRole`, `iam:CreatePolicy`, `iam:AttachRolePolicy`; one apply creates the EC2 role and its access policy and publishes `instance-role-arn` to SSM)
    - **(2b) o11y-cloudfront-streaming `iam/`** — 🔐 **Admin** (`iam:CreateRole` for Firehose/Lambda/CloudFront roles). Publishes `firehose_role_arn` and `kinesis_stream_arn` to SSM. Stop here — don't deploy `streaming/` yet.
 3. **(2c/2d) After 2a + 2b** — these can run in parallel with each other:
-   - **(2c) pdc-cds-infra CloudFront** — 🔑 **Platform Engineer** — deploy `cloudfront/pds-main` with `enable_o11y_batch = true` and `enable_o11y_streaming = true`. Requires `iam:PassRole` because `aws_cloudfront_realtime_log_config` accepts a `role_arn` for CloudFront→Kinesis delivery. Reads `ec2_role_arn` and `kinesis_stream_arn` from SSM.
-   - **(2d) o11y-cloudfront-batch S3 + Logstash** — 👤 **Power User** / 🔑 **Platform Engineer** — `s3` creates `pds-dev-gh01dc-web-analytics`; `logstash` needs `iam:PassRole` to the EC2 instance profile. Does not depend on CloudFront.
+   - **(2c) pdc-cds-infra CloudFront** — 🔑 **Platform Engineer** — deploy `cloudfront/pds-main` with `enable_o11y_batch = true` and `enable_o11y_streaming = true`. Requires `iam:PassRole` because `aws_cloudfront_realtime_log_config` accepts a `role_arn` for CloudFront→Kinesis delivery. Reads `instance-role-arn` and `kinesis_stream_arn` from SSM.
+   - **(2d) o11y-cloudfront-batch S3 + Logstash** — 👤 **Power User** / 🔑 **Platform Engineer** — `s3` creates `pds-dev-gh01dc-web-analytics`; `logstash` needs `iam:PassRole` to the EC2 instance profile and publishes its security group ID to SSM for the OpenSearch ingress rule. Does not depend on CloudFront.
 4. **(3) o11y-cloudfront-streaming/streaming + grant OpenSearch access** — 🔑 **Platform Engineer** / 👤 **Power User**:
    - **o11y-cloudfront-streaming/streaming** — 🔑 **Platform Engineer** (`iam:PassRole` for `aws_kinesis_firehose_delivery_stream` and `aws_lambda_function`). Firehose reads from Kinesis → OpenSearch, backs up to `pds-logs-dev`.
-   - **opensearch re-apply** — 👤 **Power User** — `task apply VENUE=dev COMPONENT=o11y-platform/opensearch` with `o11y_cloudfront_batch_enabled = true` and `o11y_cloudfront_streaming_enabled = true` set in the terragrunt inputs. Access-policy-only update, completes in seconds.
+   - **opensearch re-apply** — 👤 **Power User** — `task apply VENUE=dev COMPONENT=o11y-platform/opensearch` with `o11y_cloudfront_batch_enabled = true` and `o11y_cloudfront_streaming_enabled = true` set in the terragrunt inputs. Access-policy and ingress-rule update only, completes in seconds. See [`opensearch` is always applied twice](#deployment-flow) for what each flag requires to already be applied.
 5. **(4) OpenSearch UI Application** — 👤 **Power User** (manual) — see [OpenSearch UI Application](#opensearch-ui-application) for the full sequence.
 
 **Two log buckets:**
@@ -141,7 +155,7 @@ No manual URL values. First-time deploys need a one-time `aws ssm put-parameter`
   unset AWS_PROFILE  # required for Terraform S3 backend compatibility
   ```
 
-No local tfvars files are needed — all variables are managed as Terragrunt inputs in `cds-infra-deploy`.
+No tfvars files are needed — all variables are managed as Terragrunt inputs in `cds-infra-deploy`. The `opensearch/tfvars/*.tfvars.example` files are a reference for running the module as plain Terraform in a standalone setup; they are not the operational deployment path. See the [opensearch README](opensearch/README.md#deploy) for the Terragrunt `inputs` shape.
 
 ---
 
@@ -151,7 +165,7 @@ All commands below run from a checkout of `cds-infra-deploy`. Replace `dev` with
 
 ### Phase 1 — Bootstrap OpenSearch 👤 Power User (~15-20 min)
 
-Before planning, confirm `o11y_cloudfront_batch_enabled` and `o11y_cloudfront_streaming_enabled` are both `false` (or unset, which defaults to `false`) in `venues/<venue>/o11y-platform/opensearch/terragrunt.hcl`. The consumer role ARNs don't exist in SSM yet, so enabling either flag now fails the plan.
+Before planning, confirm `o11y_cloudfront_batch_enabled` and `o11y_cloudfront_streaming_enabled` are both `false` (or unset, which defaults to `false`) in `venues/<venue>/o11y-platform/opensearch/terragrunt.hcl`. The consumer role ARNs and security group IDs don't exist in SSM yet, so enabling either flag now fails the plan. This is the first of the two `opensearch` applies; the second is in Phase 3.
 
 ```bash
 VENUE=dev   # set to your target venue
@@ -176,7 +190,7 @@ task plan  VENUE=dev COMPONENT=o11y-cloudfront-batch/iam
 task apply VENUE=dev COMPONENT=o11y-cloudfront-batch/iam
 ```
 
-Creates the EC2 role and instance profile and the S3/OpenSearch access policy attached to the role, in one apply. Publishes `ec2_role_arn` to SSM.
+Creates the EC2 role and instance profile and the S3/OpenSearch access policy attached to the role, in one apply. Publishes `instance-role-arn` to SSM.
 
 ### Phase 2b — o11y-cloudfront-streaming IAM 🔐 Admin (parallel with 2a)
 
@@ -203,7 +217,7 @@ Publishes `firehose_role_arn` and `kinesis_stream_arn` to SSM. Stop here — do 
 
 ### Phase 2c — pdc-cds-infra CloudFront 🔑 Platform Engineer (after 2a + 2b complete)
 
-Reads `ec2_role_arn` (from 2a) and `kinesis_stream_arn` (from 2b). Also takes ownership of the `pds-logs-bucket-arn` SSM param seeded above.
+Reads `instance-role-arn` (from 2a) and `kinesis_stream_arn` (from 2b). Also takes ownership of the `pds-logs-bucket-arn` SSM param seeded above.
 
 Before planning, confirm `enable_o11y_batch` and `enable_o11y_streaming` are both `true` in `venues/<venue>/pdc-cds-infra/cloudfront/pds-main/terragrunt.hcl`. They are `false` in test and prod until set, and while they are `false` CloudFront does not send logs to o11y.
 
@@ -241,8 +255,10 @@ deploy, then run the checks in
 [Verify the deployment](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#verify-the-deployment)
 (`scripts/smoke-test.sh`). Pipeline changes are tested before deploy with the suite in
 [`tests/README.md`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md).
+Logstash cannot write to OpenSearch until the second `opensearch` apply in Phase 3 turns on
+`o11y_cloudfront_batch_enabled`; the smoke test's OpenSearch checks fail until then.
 
-### Phase 3 — o11y-cloudfront-streaming/streaming + re-enable OpenSearch consumers
+### Phase 3 — o11y-cloudfront-streaming/streaming + re-enable OpenSearch consumers (second `opensearch` apply)
 
 ```bash
 # 🔑 Platform Engineer
@@ -267,7 +283,8 @@ Principals are read from SSM at plan time, each gated by a Terragrunt input flag
 
 | Terragrunt input flag | SSM path (read only when flag is `true`) | Published by |
 |---|---|---|
-| `o11y_cloudfront_batch_enabled` | `/pds/o11y-cloudfront-batch/iam/ec2_role_arn` | o11y-cloudfront-batch `iam` module |
+| `o11y_cloudfront_batch_enabled` | `/pds/o11y-cloudfront-batch/iam/roles/ec2/instance-role-arn` | o11y-cloudfront-batch `iam` module |
+| `o11y_cloudfront_batch_enabled` + `vpc_enabled` | `/pds/o11y-cloudfront-batch/ec2/logstash_security_group_id` | o11y-cloudfront-batch `logstash` module |
 | `o11y_cloudfront_streaming_enabled` | `/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn` | o11y-cloudfront-streaming `iam/` module |
 | `o11y_cloudfront_streaming_enabled` + `vpc_enabled` | `/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id` | o11y-cloudfront-streaming `iam/` module |
 
