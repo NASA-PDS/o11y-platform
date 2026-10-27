@@ -31,6 +31,7 @@ locals {
   opensearch_access_principals = concat(
     var.o11y_cloudfront_batch_enabled ? [data.aws_ssm_parameter.ec2_role_arn[0].value] : [],
     var.o11y_cloudfront_streaming_enabled ? [data.aws_ssm_parameter.firehose_role_arn[0].value] : [],
+    var.ops_role_arns,
   )
 }
 
@@ -144,8 +145,9 @@ resource "aws_opensearch_domain" "this" { #NOSONAR
 
 
 
-# Absent until at least one consumer is enabled — an access policy with an
-# empty Principal.AWS is invalid, and on the initial bootstrap deploy no role ARNs exist in SSM yet.
+# Absent until at least one principal exists (an enabled consumer or an entry in ops_role_arns) —
+# an access policy with an empty Principal.AWS is invalid, and on the initial bootstrap deploy no
+# consumer role ARNs exist in SSM yet.
 resource "aws_opensearch_domain_policy" "this" {
   count       = length(local.opensearch_access_principals) > 0 ? 1 : 0
   domain_name = var.domain_name

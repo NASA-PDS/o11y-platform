@@ -113,6 +113,17 @@ variable "o11y_cloudfront_streaming_enabled" {
   default     = false
 }
 
+variable "ops_role_arns" {
+  type        = list(string)
+  description = "IAM role ARNs of operators granted es:ESHttp* on the domain, in addition to the enabled consumer roles. Used for ops access through the OpenSearch UI Application. Must be IAM role ARNs (arn:<partition>:iam::<account-id>:role/<name>), which match every session of the role; assumed-role/STS ARNs do not match. Leave empty when operators already have es:ESHttp* through their own IAM policy."
+  default     = []
+
+  validation {
+    condition     = alltrue([for arn in var.ops_role_arns : can(regex("^arn:[a-z-]+:iam::[0-9]{12}:role/.+$", arn))])
+    error_message = "ops_role_arns entries must be IAM role ARNs of the form arn:<partition>:iam::<account-id>:role/<name>. Assumed-role (arn:...:sts::...) ARNs are not valid principals here."
+  }
+}
+
 variable "venue" {
   type        = string
   description = "Tag value for venue (dev, test, prod)"

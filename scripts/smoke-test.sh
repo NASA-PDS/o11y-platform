@@ -70,7 +70,7 @@ echo "== OpenSearch domain status =="
 if [[ -z "$ARN" ]]; then
   echo "  SKIP  (no ARN from SSM)"
 else
-  DOMAIN_NAME=$(echo "$ARN" | sed 's|.*/domain/||')
+  DOMAIN_NAME="${ARN##*:domain/}"
 
   DOMAIN_JSON=$(aws opensearch describe-domain \
     --domain-name "$DOMAIN_NAME" --region "$REGION" \
@@ -102,7 +102,7 @@ echo "== OpenSearch cluster health =="
 if [[ -z "$ARN" ]]; then
   echo "  SKIP  (no ARN from SSM)"
 else
-  DOMAIN_NAME=$(echo "$ARN" | sed 's|.*/domain/||')
+  DOMAIN_NAME="${ARN##*:domain/}"
 
   HEALTH_JSON=$(aws opensearch describe-domain-health \
     --domain-name "$DOMAIN_NAME" --region "$REGION" \

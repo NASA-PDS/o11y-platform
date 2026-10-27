@@ -60,8 +60,9 @@ No modules.
 | <a name="input_master_node_count"></a> [master\_node\_count](#input\_master\_node\_count) | Number of dedicated master nodes | `number` | `3` | no |
 | <a name="input_master_node_instance_type"></a> [master\_node\_instance\_type](#input\_master\_node\_instance\_type) | Instance type for dedicated master nodes | `string` | `"m6g.large.search"` | no |
 | <a name="input_node_to_node_encryption"></a> [node\_to\_node\_encryption](#input\_node\_to\_node\_encryption) | Enable node-to-node encryption | `bool` | `true` | no |
-| <a name="input_o11y_cloudfront_batch_enabled"></a> [o11y\_cloudfront\_batch\_enabled](#input\_o11y\_cloudfront\_batch\_enabled) | Whether the o11y-cloudfront-batch consumer has been deployed. When true, its Logstash EC2 role ARN is read from SSM (/pds/o11y-cloudfront-batch/iam/roles/ec2/instance-role-arn) and added as an OpenSearch access-policy principal, and its Logstash SG ID is read from SSM (/pds/o11y-cloudfront-batch/ec2/logstash_security_group_id) to create the Logstash→OpenSearch VPC ingress rule. Leave false for the initial bootstrap deploy (before o11y-cloudfront-batch's iam and logstash modules have published those parameters), then re-apply with true once both exist — this only updates the access policy and ingress rule, no domain redeployment. | `bool` | `false` | no |
+| <a name="input_o11y_cloudfront_batch_enabled"></a> [o11y\_cloudfront\_batch\_enabled](#input\_o11y\_cloudfront\_batch\_enabled) | Whether the o11y-cloudfront-batch consumer has been deployed. When true, its Logstash EC2 role ARN is read from SSM (/pds/o11y-cloudfront-batch/iam/roles/ec2/instance-role-arn) and added as an OpenSearch access-policy principal, and its Logstash SG ID is read from SSM (/pds/o11y-cloudfront-batch/ec2/logstash\_security\_group\_id) to create the Logstash→OpenSearch VPC ingress rule. Leave false for the initial bootstrap deploy (before o11y-cloudfront-batch's iam and logstash modules have published those parameters), then re-apply with true once both exist — this only updates the access policy and ingress rule, no domain redeployment. | `bool` | `false` | no |
 | <a name="input_o11y_cloudfront_streaming_enabled"></a> [o11y\_cloudfront\_streaming\_enabled](#input\_o11y\_cloudfront\_streaming\_enabled) | Whether the o11y-cloudfront-streaming consumer has been deployed. When true, its Firehose role ARN is read from SSM (/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn) and added as an OpenSearch access-policy principal, and its Firehose SG ID is read from SSM (/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id) to create the Firehose→OpenSearch VPC ingress rule. Leave false for the initial bootstrap deploy (before o11y-cloudfront-streaming has published those SSM parameters), then re-apply with true once it exists — this only updates the access policy and ingress rule, no domain redeployment. | `bool` | `false` | no |
+| <a name="input_ops_role_arns"></a> [ops\_role\_arns](#input\_ops\_role\_arns) | IAM role ARNs of operators granted es:ESHttp* on the domain, in addition to the enabled consumer roles. Used for ops access through the OpenSearch UI Application. Must be IAM role ARNs (arn:<partition>:iam::<account-id>:role/<name>), which match every session of the role; assumed-role/STS ARNs do not match. Leave empty when operators already have es:ESHttp* through their own IAM policy. | `list(string)` | `[]` | no |
 | <a name="input_partition"></a> [partition](#input\_partition) | AWS partition (aws, aws-us-gov, aws-cn) | `string` | `"aws"` | no |
 | <a name="input_tenant"></a> [tenant](#input\_tenant) | Tag value for tenant | `string` | `"en"` | no |
 | <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | VPC ID for the OpenSearch domain security group. Required when vpc\_enabled = true. | `string` | `""` | no |
@@ -113,111 +114,40 @@ inputs = {
   o11y_cloudfront_batch_enabled     = false
   o11y_cloudfront_streaming_enabled = false
 
+  # Operator IAM role ARNs granted es:ESHttp* on the domain (see ../README.md#phase-8---opensearch-ui-application).
+  ops_role_arns = []
+
   engine_version = "OpenSearch_2.19"
 }
 ```
 
-Run it from a `cds-infra-deploy` checkout:
-
-```bash
-cd /path/to/cds-infra-deploy
-
-# Export AWS credentials (unset AWS_PROFILE for S3 backend compatibility)
-eval $(aws configure export-credentials --profile <your-profile> --format env)
-unset AWS_PROFILE
-
-terragrunt plan  --working-dir venues/dev/o11y-platform/opensearch
-terragrunt apply --working-dir venues/dev/o11y-platform/opensearch
-```
-
-Domain creation takes ~15–20 minutes.
+Deploy from a `cds-infra-deploy` checkout with the credentials and variables from the runbook [Prerequisites](../README.md#prerequisites). The bootstrap apply is [Phase 1](../README.md#phase-1---bootstrap-opensearch) and the consumer re-apply is [Phase 5](../README.md#phase-5---grant-consumers-opensearch-access).
 
 ### Standalone Terraform (reference only, not the operational path)
 
 The `tfvars/*.tfvars.example` files are a reference for the inputs the module takes when it is
 run as plain Terraform, outside Terragrunt. They are not how dev, test, or prod are deployed
 and are not kept in step with the venue values in `cds-infra-deploy`. Use them to try the module
-in a scratch account, or as a checklist of the inputs a Terragrunt `inputs` block needs.
+in a scratch account, or as a checklist of the inputs a Terragrunt `inputs` block needs. Export
+credentials as described in the runbook [Prerequisites](../README.md#prerequisites) first.
 
 ```bash
 cd terraform/
 cp opensearch/tfvars/dev.tfvars.example opensearch/tfvars/dev.tfvars
 # edit dev.tfvars (gitignored): fill in domain_name, vpc_id, vpc_subnet_ids
 
-eval $(aws configure export-credentials --profile <your-profile> --format env)
-unset AWS_PROFILE
-
 task opensearch:plan   VENUE=dev
 task opensearch:deploy VENUE=dev
 ```
 
-### Post-deploy: authorize console access for VPC domains
+### Post-deploy and verification
 
-For `vpc_enabled = true` domains, the AWS Console's OpenSearch "Indexes" tab (and
-other AWS-managed console features) cannot reach the domain until the
-`application.opensearchservice.amazonaws.com` service principal is explicitly
-authorized. This is a one-time, per-domain authorization that isn't covered by
-the domain's access policy and isn't currently expressible in the Terraform AWS
-provider (`aws_opensearch_authorize_vpc_endpoint_access` only supports
-authorizing AWS accounts, not service principals — see
-[hashicorp/terraform-provider-aws#41879](https://github.com/hashicorp/terraform-provider-aws/issues/41879)).
-
-Run this manually after every `opensearch:deploy` that creates a new domain
-(not needed for updates to an existing domain). `domain_name` isn't published
-to SSM directly, so it's pulled from the domain ARN:
-
-```bash
-# Same exported credentials as the Terraform steps above (AWS_PROFILE unset).
-# If you need a profile for this one-off CLI call, pass --profile <your-profile>
-# on each aws command instead of exporting AWS_PROFILE.
-
-DOMAIN_NAME=$(aws ssm get-parameter \
-  --name /pds/o11y-platform/opensearch/opensearch_arn \
-  --query Parameter.Value --output text \
-  | awk -F/ '{print $NF}')
-
-aws opensearch authorize-vpc-endpoint-access \
-  --domain-name "$DOMAIN_NAME" \
-  --service application.opensearchservice.amazonaws.com
-```
-
-Without this, the console will show: *"The OpenSearch Service Features cannot
-access this VPC-enabled domain."*
-
-### Smoke test
-
-After deploy, verify SSM parameters are published and the endpoint is reachable:
-
-```bash
-bash scripts/smoke-test.sh dev
-```
-
-The script checks that all three SSM parameters exist, that the domain is created and not processing, and that cluster health is Green or Yellow — all via AWS control-plane APIs, no VPC access required.
+- **Console access for the VPC domain** (one-time authorization of `application.opensearchservice.amazonaws.com`): [Phase 8, Step 1](../README.md#phase-8---opensearch-ui-application).
+- **Smoke test** (`scripts/smoke-test.sh` at the repo root): [Phase 1 Verify](../README.md#phase-1---bootstrap-opensearch).
 
 ## Upgrade
 
-### State key rename (one-time)
-
-Live venues still store state at `observability/opensearch.tfstate`. This module pins `o11y-platform/opensearch.tfstate`. Copy the object **before** the first Terragrunt plan/apply on this branch; do not init against an empty new key.
-
-```bash
-VENUE=dev   # or test / prod
-BUCKET="pds-${VENUE}-infra"
-
-aws s3 cp \
-  "s3://${BUCKET}/observability/opensearch.tfstate" \
-  "s3://${BUCKET}/o11y-platform/opensearch.tfstate"
-
-# if the old backend used use_lockfile = true:
-aws s3 cp \
-  "s3://${BUCKET}/observability/opensearch.tfstate.tflock" \
-  "s3://${BUCKET}/o11y-platform/opensearch.tfstate.tflock" \
-  || true
-```
-
-If `cds-infra-deploy` Terragrunt `remote_state` also sets a key, change it to `o11y-platform/opensearch.tfstate` in the same move — Terragrunt-generated backends ignore this repo’s `backend.tf` key.
-
-Then run the normal Terragrunt plan from `cds-infra-deploy`. Confirm it wants **updates** (access policy, SG rules, SSM path rename), **not** `aws_opensearch_domain.this` create. Only then apply. Leave the old object until that apply succeeds; delete it afterward so nobody inits against it by mistake. Greenfield venues can skip this step.
+Re-apply from `cds-infra-deploy` after changing the Terragrunt inputs. Run the [smoke test](../README.md#phase-1---bootstrap-opensearch) afterward.
 
 ### Engine version
 
