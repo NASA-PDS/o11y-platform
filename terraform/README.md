@@ -149,20 +149,18 @@ Phase 6 runs last, after every component it points at exists. See [Phase 6](#pha
 
 ## Initial deployment
 
-Complete the phases in order. Run each Verify step and get the expected result before moving on. Three phases end with a smoke test: Phase 1 (OpenSearch domain), Phase 6 (streaming), and Phase 7 (Logstash). [Testing](#testing) lists when to run each. Each phase starts with a Setup block: edit its values, then run it. It sets the variables the phase uses, exports credentials for the phase's permission tier, and changes into the directory the commands run from.
+Run the phases in order. In each phase, run **Setup**, then **Steps**, then **Verify**. Do not continue until Verify passes. Phases 1, 6, and 7 end with a smoke test; see [Testing](#testing).
 
 ### Phase 1 - Bootstrap OpenSearch
 
-**Tier:** Power User. **Time:** about 15-20 minutes.
-
-Creates the VPC-only domain and its security group, and publishes the endpoint, ARN, and security group ID to SSM. No consumer is enabled. Venue inputs are in `venues/<venue>/o11y-platform/opensearch/terragrunt.hcl`; the inputs shape is in the [opensearch module README](opensearch/README.md#deploy).
+**Tier:** Power User. **Time:** 15-20 min. **Creates:** the VPC-only domain; publishes its endpoint, ARN, and security group ID to SSM. **Inputs:** [opensearch README](opensearch/README.md#deploy).
 
 **Setup**
 
 ```bash
 VENUE="dev"                                       # dev | test | prod
 REGION="us-west-2"
-PROFILE_NAME="<aws-profile-name>"
+PROFILE_NAME="<power-user-sso-profile>"
 CDS_INFRA_DEPLOY_DIR="<path-to-cds-infra-deploy-checkout>"
 O11Y_PLATFORM_DIR="<path-to-o11y-platform-checkout>"
 
@@ -188,28 +186,29 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
    task apply VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
    ```
 
-**Verify - OpenSearch smoke test**
-
-Run it from your workstation after the apply finishes:
+**Verify** (OpenSearch smoke test)
 
 ```bash
 bash "${O11Y_PLATFORM_DIR}/scripts/smoke-test.sh" "${VENUE}"
 ```
 
-Expected: `All 7 check(s) passed.` The script checks the three SSM parameters, the security group, domain status, and cluster health (Green or Yellow). If a check fails, wait for the domain to leave `Processing` and re-run; if an SSM parameter is missing, the apply did not complete.
+Expect: `All 7 check(s) passed.`
+
+**If it fails**
+
+- Domain is `Processing`: wait, then re-run.
+- SSM parameter missing: the apply did not complete.
 
 ### Phase 2 - IAM
 
-**Tier:** Admin. Needs Phase 1. Phases 2a and 2b are independent and can run in either order.
+**Tier:** Admin. **Needs:** Phase 1. **Creates:** the consumer IAM roles; publishes their ARNs to SSM. 2a and 2b can run in either order. **Inputs:** [batch `iam`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md), [streaming `iam/`](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/iam/README.md).
 
-Each consumer's `iam` module creates its roles and publishes their ARNs to SSM. Module details: [batch `iam`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md), [streaming `iam/`](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/iam/README.md).
-
-**Setup** (both 2a and 2b)
+**Setup** (2a and 2b)
 
 ```bash
 VENUE="dev"                                       # dev | test | prod
 REGION="us-west-2"
-PROFILE_NAME="<aws-profile-name>"
+PROFILE_NAME="<admin-sso-profile>"
 CDS_INFRA_DEPLOY_DIR="<path-to-cds-infra-deploy-checkout>"
 
 eval $(aws configure export-credentials --profile "${PROFILE_NAME}" --format env)
@@ -220,24 +219,26 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 **2a - o11y-cloudfront-batch**
 
-```bash
-task plan  VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/iam
-task apply VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/iam
-```
+1. Plan and apply:
 
-Verify:
+   ```bash
+   task plan  VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/iam
+   task apply VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/iam
+   ```
 
-```bash
-aws ssm get-parameter --region "${REGION}" \
-  --name /pds/o11y-cloudfront-batch/iam/roles/ec2/instance-role-arn \
-  --query Parameter.Value --output text
-```
+2. Verify:
 
-Expected: an IAM role ARN. `ParameterNotFound` means the apply did not complete.
+   ```bash
+   aws ssm get-parameter --region "${REGION}" \
+     --name /pds/o11y-cloudfront-batch/iam/roles/ec2/instance-role-arn \
+     --query Parameter.Value --output text
+   ```
+
+   Expect: an IAM role ARN.
 
 **2b - o11y-cloudfront-streaming**
 
-1. On a first deploy only, confirm the logs bucket ARN parameter exists. Streaming `iam/` reads it.
+1. Check the logs bucket ARN parameter:
 
    ```bash
    aws ssm get-parameter --region "${REGION}" \
@@ -245,7 +246,9 @@ Expected: an IAM role ARN. `ParameterNotFound` means the apply did not complete.
      --query Parameter.Value --output text
    ```
 
-   Expected: `arn:aws:s3:::pds-logs-<venue>`. If the result is `ParameterNotFound`, seed it once. Phase 6 takes the parameter over without an import.
+   Expect: `arn:aws:s3:::pds-logs-<venue>`.
+
+2. Only if step 1 returned `ParameterNotFound`, seed it:
 
    ```bash
    aws ssm put-parameter \
@@ -255,58 +258,68 @@ Expected: an IAM role ARN. `ParameterNotFound` means the apply did not complete.
      --type String
    ```
 
-2. Plan and apply:
+3. Plan and apply:
 
    ```bash
    task plan  VENUE="${VENUE}" COMPONENT=o11y-cloudfront-streaming/iam
    task apply VENUE="${VENUE}" COMPONENT=o11y-cloudfront-streaming/iam
    ```
 
-Verify:
+4. Verify:
 
-```bash
-for P in cloudfront/cloudfront-role-arn firehose/firehose-role-arn kinesis/kinesis-stream-arn; do
-  aws ssm get-parameter --region "${REGION}" \
-    --name "/pds/o11y-cloudfront-streaming/${P}" \
-    --query Parameter.Value --output text
-done
-```
+   ```bash
+   for P in cloudfront/cloudfront-role-arn firehose/firehose-role-arn kinesis/kinesis-stream-arn; do
+     aws ssm get-parameter --region "${REGION}" \
+       --name "/pds/o11y-cloudfront-streaming/${P}" \
+       --query Parameter.Value --output text
+   done
+   ```
 
-Expected: three ARNs. The Kinesis ARN is computed; the stream itself does not exist until Phase 4. Do not deploy `streaming/` yet.
+   Expect: three ARNs.
+
+**Notes**
+
+- Phase 6 takes over the bucket ARN parameter; no import is needed.
+- The Kinesis ARN is computed. The stream exists after Phase 4. Do not deploy `streaming/` yet.
 
 ### Phase 3 - Batch S3 and Logstash EC2
 
-**Tier:** Power User for `s3` (3a), Platform Engineer for `logstash` (3b, `iam:PassRole` to the EC2 instance profile). Needs Phases 1 and 2a.
-
-`s3` creates the bucket that receives PDS node access logs. `logstash` creates the EC2 instance and its security group, and publishes the security group ID. This phase creates the instance only; Logstash is installed in Phase 7.
+**Tier:** 3a Power User, 3b Platform Engineer. **Needs:** Phases 1 and 2a. **Creates:** the log bucket (3a) and the Logstash EC2 and its security group (3b). Logstash is installed in Phase 7. **Inputs:** [batch Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md).
 
 **Setup**
 
 ```bash
 VENUE="dev"                                       # dev | test | prod
 REGION="us-west-2"
-PROFILE_NAME="<aws-profile-name>"
 CDS_INFRA_DEPLOY_DIR="<path-to-cds-infra-deploy-checkout>"
+PROFILE_POWER_USER="<power-user-sso-profile>"
+PROFILE_PLATFORM_ENGINEER="<platform-engineer-sso-profile>"
 
-eval $(aws configure export-credentials --profile "${PROFILE_NAME}" --format env)
-unset AWS_PROFILE
 export AWS_DEFAULT_REGION="${REGION}"
 cd "${CDS_INFRA_DEPLOY_DIR}"
 ```
 
-**3a - s3**
+**Steps**
 
-```bash
-task plan  VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/s3
-task apply VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/s3
-```
+1. 3a - `s3` (Power User):
 
-**3b - logstash**
+   ```bash
+   eval $(aws configure export-credentials --profile "${PROFILE_POWER_USER}" --format env)
+   unset AWS_PROFILE
 
-```bash
-task plan  VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/logstash
-task apply VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/logstash
-```
+   task plan  VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/s3
+   task apply VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/s3
+   ```
+
+2. 3b - `logstash` (Platform Engineer):
+
+   ```bash
+   eval $(aws configure export-credentials --profile "${PROFILE_PLATFORM_ENGINEER}" --format env)
+   unset AWS_PROFILE
+
+   task plan  VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/logstash
+   task apply VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/logstash
+   ```
 
 **Verify**
 
@@ -319,18 +332,18 @@ aws ssm get-parameter --region "${REGION}" \
   --query Parameter.Value --output text
 ```
 
-Expected: a bucket name and a `sg-` ID. Module details: [batch Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md).
+Expect: a bucket name, then a `sg-` ID.
 
 ### Phase 4 - Streaming
 
-**Tier:** Platform Engineer (`iam:PassRole` to Firehose and Lambda). Needs Phases 1 and 2b.
+**Tier:** Platform Engineer. **Needs:** Phases 1 and 2b. **Creates:** the Kinesis stream, Lambda transform, Firehose delivery stream, and Firehose security group. **Inputs:** [streaming Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md).
 
-Creates the Kinesis stream, Lambda transform, Firehose delivery stream, and the Firehose security group. The apply succeeds before OpenSearch access is granted, but Firehose cannot write to the domain until Phase 5.
+**Setup**
 
 ```bash
 VENUE="dev"                                       # dev | test | prod
 REGION="us-west-2"
-PROFILE_NAME="<aws-profile-name>"
+PROFILE_NAME="<platform-engineer-sso-profile>"
 CDS_INFRA_DEPLOY_DIR="<path-to-cds-infra-deploy-checkout>"
 
 eval $(aws configure export-credentials --profile "${PROFILE_NAME}" --format env)
@@ -341,11 +354,12 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 **Steps**
 
-```bash
-VENUE="dev"
-task plan  VENUE="${VENUE}" COMPONENT=o11y-cloudfront-streaming/streaming
-task apply VENUE="${VENUE}" COMPONENT=o11y-cloudfront-streaming/streaming
-```
+1. Plan and apply:
+
+   ```bash
+   task plan  VENUE="${VENUE}" COMPONENT=o11y-cloudfront-streaming/streaming
+   task apply VENUE="${VENUE}" COMPONENT=o11y-cloudfront-streaming/streaming
+   ```
 
 **Verify**
 
@@ -359,20 +373,22 @@ aws kinesis describe-stream-summary --region "${REGION}" \
   --query StreamDescriptionSummary.StreamStatus --output text
 ```
 
-Expected: a `sg-` ID and `ACTIVE`. Module details: [streaming Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md).
+Expect: a `sg-` ID, then `ACTIVE`.
+
+**Notes**
+
+- Firehose cannot write to the domain until Phase 5.
 
 ### Phase 5 - Grant consumers OpenSearch access
 
-**Tier:** Power User. **Time:** seconds. Needs Phases 2a, 2b, 3, and 4.
-
-The second `opensearch` apply. It adds both consumer role ARNs to the access policy and both security groups to the ingress rules.
+**Tier:** Power User. **Needs:** Phases 2a, 2b, 3, and 4. **Time:** seconds. **Does:** the second `opensearch` apply. Adds both consumer roles to the access policy and both security groups to the ingress rules.
 
 **Setup**
 
 ```bash
 VENUE="dev"                                       # dev | test | prod
 REGION="us-west-2"
-PROFILE_NAME="<aws-profile-name>"
+PROFILE_NAME="<power-user-sso-profile>"
 CDS_INFRA_DEPLOY_DIR="<path-to-cds-infra-deploy-checkout>"
 
 eval $(aws configure export-credentials --profile "${PROFILE_NAME}" --format env)
@@ -383,26 +399,33 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 **Steps**
 
-1. Set both flags to `true` in `venues/<venue>/o11y-platform/opensearch/terragrunt.hcl` in `cds-infra-deploy`:
+1. Set both flags to `true` in `venues/<venue>/o11y-platform/opensearch/terragrunt.hcl`:
 
    ```hcl
    o11y_cloudfront_batch_enabled     = true
    o11y_cloudfront_streaming_enabled = true
    ```
 
-   Confirm the edit:
+2. Confirm the edit:
 
    ```bash
    grep -nE 'o11y_cloudfront_(batch|streaming)_enabled' \
      "venues/${VENUE}/o11y-platform/opensearch/terragrunt.hcl"
    ```
 
-   Expected: both lines end in `true`.
+   Expect: both lines end in `true`.
 
-2. Plan, and confirm the plan only changes the access policy and adds two ingress rules. It must not replace `aws_opensearch_domain.this`. Then apply:
+3. Plan:
 
    ```bash
-   task plan  VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
+   task plan VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
+   ```
+
+   Expect: only the access policy changes and two ingress rules are added. No `aws_opensearch_domain.this` replacement.
+
+4. Apply:
+
+   ```bash
    task apply VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
    ```
 
@@ -424,28 +447,21 @@ aws ec2 describe-security-group-rules --region "${REGION}" \
   --output text
 ```
 
-Expected: the access policy lists both role ARNs (the batch `instance-role-arn` and the streaming `firehose-role-arn`). The ingress rules show two rows on port `443`, one for the Logstash security group and one for the Firehose security group.
+Expect:
+
+- The access policy lists the batch `instance-role-arn` and the streaming `firehose-role-arn`.
+- Two ingress rows on port `443`: the Logstash security group and the Firehose security group.
 
 ### Phase 6 - CloudFront (`pds-main`)
 
-**Tier:** Platform Engineer (`iam:PassRole` for the CloudFront real-time log config). Needs Phases 2a, 2b, 4, and 5.
-
-Applies `cloudfront/pds-main` from [pdc-cds-infra](https://github.com/NASA-PDS/pdc-cds-infra) with both o11y flags on. It:
-
-- creates the CloudFront real-time log config that sends records to the Kinesis stream (`enable_o11y_streaming`);
-- adds bucket policy statements on `pds-logs-<venue>`: `AllowO11yBatchLogstashRead` lets the Logstash role read the CloudFront access-log prefix (`enable_o11y_batch`), and `AllowFirehoseWrite` lets Firehose write its S3 backup (`enable_o11y_streaming`);
-- manages `/pds/pdc-cds-infra/s3/pds-logs-bucket-arn`.
-
-**Why this phase is last before the Logstash deploy:** it points the shared CloudFront distribution at the Kinesis stream and opens the logs bucket to Logstash. Running it after Phases 4 and 5 means the stream exists, OpenSearch already accepts both consumers, and a failure is easy to back out by setting both flags to `false`. See the pdc-cds-infra [o11y integration](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/cloudfront/pds-main/README.md#o11y-integration) section for the module inputs.
-
-`enable_o11y_batch` is needed only if Logstash ingests CloudFront logs from `pds-logs-<venue>` (`S3_CF_BUCKET_NAME` is set in the Logstash environment).
+**Tier:** Platform Engineer. **Needs:** Phases 2a, 2b, 4, and 5. **Creates:** the CloudFront real-time log config (to Kinesis) and the `AllowO11yBatchLogstashRead` and `AllowFirehoseWrite` statements on the `pds-logs-<venue>` bucket policy. **Inputs:** [pds-main o11y integration](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/cloudfront/pds-main/README.md#o11y-integration).
 
 **Setup**
 
 ```bash
 VENUE="dev"                                       # dev | test | prod
 REGION="us-west-2"
-PROFILE_NAME="<aws-profile-name>"
+PROFILE_NAME="<platform-engineer-sso-profile>"
 CDS_INFRA_DEPLOY_DIR="<path-to-cds-infra-deploy-checkout>"
 O11Y_STREAMING_DIR="<path-to-o11y-cloudfront-streaming-checkout>"
 
@@ -457,12 +473,14 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 **Steps**
 
-1. Confirm both flags are `true`. The module default is `true`; check the venue file for an override.
+1. Confirm both flags are `true`:
 
    ```bash
    grep -nE 'enable_o11y_(batch|streaming)' \
      "venues/${VENUE}/pdc-cds-infra/cloudfront/pds-main/terragrunt.hcl"
    ```
+
+   Expect: `true` or no match (the module default is `true`).
 
 2. Plan and apply:
 
@@ -481,34 +499,48 @@ aws s3api get-bucket-policy --bucket "pds-logs-${VENUE}" \
   --query Policy --output text
 ```
 
-Expected: `pds-cloudfront-realtime-log-config` is listed, and the bucket policy contains the Sids `AllowO11yBatchLogstashRead` and `AllowFirehoseWrite`. The second command needs `s3:GetBucketPolicy`. Allow several minutes for the distribution to finish deploying before expecting records.
+Expect: `pds-cloudfront-realtime-log-config` is listed. The bucket policy contains `AllowO11yBatchLogstashRead` and `AllowFirehoseWrite`.
 
-**Verify - streaming smoke test**
+**Verify** (streaming smoke test)
 
-Run the streaming smoke test once the distribution has finished deploying (several minutes after the apply). It needs Phase 4 (the Kinesis stream) and this phase (the log config). The procedure, expected result, and what a failure means are in the streaming repo: [Verify](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#verify). The test stops at Kinesis; whether Firehose delivered to OpenSearch is checked in [Phase 9](#phase-9---end-to-end-verify).
+Wait for the distribution to finish deploying (several minutes), then follow [Verify](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#verify) in the streaming repo.
+
+**Notes**
+
+- Runs last so the stream exists, OpenSearch accepts both consumers, and a rollback is setting both flags to `false`.
+- `enable_o11y_batch` is needed only if `S3_CF_BUCKET_NAME` is set.
+- The bucket policy check needs `s3:GetBucketPolicy`.
+- The smoke test stops at Kinesis. OpenSearch delivery is checked in [Phase 9](#phase-9---end-to-end-verify).
 
 ### Phase 7 - Deploy Logstash and verify
 
-**Tier:** shell access to the EC2 as `pdsops`, through the bastion. Needs Phases 3 and 5. It also needs Phase 6 if Logstash ingests CloudFront logs (`S3_CF_BUCKET_NAME` set).
+**Tier:** `pdsops` on the EC2, through the bastion. **Needs:** Phases 3 and 5 (and 6 if `S3_CF_BUCKET_NAME` is set). **Does:** installs and starts Logstash on the Phase 3 instance. The steps are in the batch repo and set their own variables.
 
-Installs and starts Logstash on the instance created in Phase 3. This runs on the instance, not through Terragrunt, so it has no Setup block here: each batch procedure below sets the variables it uses (`S3_CF_BUCKET_NAME`, `REPO_BRANCH`, and the optional ones). The batch repo owns these steps; do not copy them here.
-
-**Steps** (on the instance, as `pdsops`)
+**Steps**
 
 1. Reach the instance: [Access model](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#access-model).
-2. Deploy Logstash: [First-boot setup](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#first-boot-setup). Its last step confirms the service is `active`.
+2. Deploy Logstash: [First-boot setup](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#first-boot-setup).
 
-**Verify - Logstash smoke test**
+**Verify** (Logstash smoke test)
 
-Run the Logstash smoke test on the instance after the deploy in step 2. Phase 5 must already be applied, because the test sends a signed request to OpenSearch. The procedure, expected result, and what each check means are in the batch repo: [Smoke test](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#3-smoke-test). The other checks, including bootstrap and data flow, are in [Verify the deployment](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#verify-the-deployment). Troubleshooting: the batch [Operations Runbook](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/docs/operations.md#troubleshooting).
+Follow [Smoke test](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#3-smoke-test) in the batch repo.
 
-This smoke test does not read the CloudFront logs bucket, so it does not exercise Phase 6. The CloudFront input is covered by [Phase 9](#phase-9---end-to-end-verify).
+Expect: exit code 0 and `PASS` on every check.
+
+**If it fails**
+
+- OpenSearch timeout or 403: the Phase 5 access policy or ingress rule is not in effect.
+- Bucket check: the Phase 3 bucket or the Phase 2a IAM policy.
+- Other: [Operations Runbook](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/docs/operations.md#troubleshooting).
+
+**Notes**
+
+- This smoke test does not read the CloudFront logs bucket. Phase 9 covers that input.
+- Other checks (bootstrap, data flow): [Verify the deployment](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#verify-the-deployment).
 
 ### Phase 8 - OpenSearch UI Application
 
-**Tier:** Power User. All steps are manual (console and CLI).
-
-The OpenSearch UI Application is an AWS-hosted web UI that reaches the VPC-only domain without a public endpoint. IAM Identity Center is not enabled in PDS accounts, so it uses IAM auth: IAM role ARNs are granted directly as admins. No Terraform resource exists yet ([hashicorp/terraform-provider-aws#45082](https://github.com/hashicorp/terraform-provider-aws/issues/45082)).
+**Tier:** Power User. **Needs:** Phase 1. **Creates:** the AWS-hosted OpenSearch UI Application with IAM auth. All steps are manual (CLI and console).
 
 **Setup**
 
@@ -522,49 +554,50 @@ eval $(aws configure export-credentials --profile "${PROFILE_NAME}" --format env
 unset AWS_PROFILE
 export AWS_DEFAULT_REGION="${REGION}"
 
-# The domain name is the last segment of the domain ARN published in SSM.
 DOMAIN_NAME=$(aws ssm get-parameter --region "${REGION}" \
   --name /pds/o11y-platform/opensearch/opensearch_arn \
   --query Parameter.Value --output text | awk -F/ '{print $NF}')
 echo "${DOMAIN_NAME}"
 ```
 
-Expected: the domain name (for example `pds-<venue>-o11y`).
+Expect: the domain name.
 
-**Step 1 - Authorize VPC access (once per domain).** The AWS console features for a VPC domain, including the Indexes tab, cannot reach it until the `application.opensearchservice.amazonaws.com` service principal is authorized. The Terraform provider cannot express this ([hashicorp/terraform-provider-aws#41879](https://github.com/hashicorp/terraform-provider-aws/issues/41879)).
+**Steps**
 
-```bash
-aws opensearch authorize-vpc-endpoint-access --region "${REGION}" \
-  --domain-name "${DOMAIN_NAME}" \
-  --service application.opensearchservice.amazonaws.com
+1. Authorize VPC access (once per domain):
 
-aws opensearch list-vpc-endpoint-access --region "${REGION}" \
-  --domain-name "${DOMAIN_NAME}"
-```
+   ```bash
+   aws opensearch authorize-vpc-endpoint-access --region "${REGION}" \
+     --domain-name "${DOMAIN_NAME}" \
+     --service application.opensearchservice.amazonaws.com
 
-Expected: the second command lists `application.opensearchservice.amazonaws.com`.
+   aws opensearch list-vpc-endpoint-access --region "${REGION}" \
+     --domain-name "${DOMAIN_NAME}"
+   ```
 
-**Step 2 - Create the application (console).**
+   Expect: the list includes `application.opensearchservice.amazonaws.com`.
 
-1. Open **Amazon OpenSearch Service > OpenSearch UI (Dashboards) > Create application**.
-2. Set **Application name** to `pds-<venue>-o11y-ui`.
-3. Leave **Authentication with IAM Identity Center** unchecked.
-4. Under **OpenSearch application admins**, choose **Grant administrator's permission to specific user(s)**, select **IAM users**, and add the ops IAM role ARN(s).
-5. Choose **Create**.
+2. Create the application. In the console, open **Amazon OpenSearch Service > OpenSearch UI (Dashboards) > Create application**, then:
+   - **Application name:** `pds-<venue>-o11y-ui`.
+   - **Authentication with IAM Identity Center:** leave unchecked.
+   - **OpenSearch application admins:** choose **Grant administrator's permission to specific user(s)**, select **IAM users**, and add the ops IAM role ARN(s).
+   - Choose **Create**.
 
-**Step 3 - Associate the domain.** On the application page choose **Manage data sources**, select the domain (the value printed by the Setup block), then **Next > Save**. **Launch Application** becomes active once a data source is associated.
+3. Associate the domain. On the application page, choose **Manage data sources**, select the domain from Setup, then **Next > Save**.
 
-**Verify:** launch the application, open **Dev Tools**, and run:
+**Verify**
+
+Launch the application, open **Dev Tools**, and run:
 
 ```text
 GET _cluster/health
 ```
 
-Expected: `"status"` is `green` or `yellow`. A 403 means the role you are using is not allowed on the domain; grant it in Step 4.
+Expect: `"status"` is `green` or `yellow`. A 403 means your role is not allowed on the domain: do Step 4.
 
-**Step 4 - Grant ops roles domain access (only if Verify returns 403).** With IAM auth the application passes the caller's IAM identity to the domain, so each operator role must be allowed on the domain.
+**Step 4 - Grant an ops role domain access (only after a 403)**
 
-1. Build the role ARN. The account ID comes from your current credentials; set the role name to the operator role that got the 403:
+1. Build the role ARN:
 
    ```bash
    OPS_ROLE_NAME="<ops-role-name>"
@@ -572,9 +605,7 @@ Expected: `"status"` is `green` or `yellow`. A 403 means the role you are using 
    echo "ops_role_arns = [\"arn:aws:iam::${ACCOUNT_ID}:role/${OPS_ROLE_NAME}\"]"
    ```
 
-2. Add the printed line to the `inputs` block in `${CDS_INFRA_DEPLOY_DIR}/venues/${VENUE}/o11y-platform/opensearch/terragrunt.hcl`. For more than one role, list the ARNs in the same array.
-
-   Use the IAM role ARN, as printed. An `arn:...:sts::...:assumed-role/...` ARN fails the plan with `Invalid value for variable "ops_role_arns"`, because it does not match the role's sessions.
+2. Add the printed line to the `inputs` block in `${CDS_INFRA_DEPLOY_DIR}/venues/${VENUE}/o11y-platform/opensearch/terragrunt.hcl`. For several roles, list the ARNs in the same array.
 
 3. Plan and apply:
 
@@ -584,35 +615,40 @@ Expected: `"status"` is `green` or `yellow`. A 403 means the role you are using 
    task apply VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
    ```
 
-4. Re-run the Verify command above.
+4. Re-run Verify.
 
-Each listed role gets `es:ESHttp*` on the domain and all paths under it: every HTTP method on every index. This is the same access the consumer roles have. Fine-grained access control is off, so there is no read-only or per-index tier. Control-plane actions such as `es:DeleteDomain` are not granted.
+**Notes**
+
+- Use the IAM role ARN as printed. An `arn:...:sts::...:assumed-role/...` ARN fails the plan with `Invalid value for variable "ops_role_arns"`.
+- Each listed role gets `es:ESHttp*` on the whole domain, the same as the consumer roles. There is no read-only or per-index tier, and no control-plane access.
+- No Terraform resource exists yet for the UI Application ([hashicorp/terraform-provider-aws#45082](https://github.com/hashicorp/terraform-provider-aws/issues/45082)) or the VPC authorization ([#41879](https://github.com/hashicorp/terraform-provider-aws/issues/41879)).
 
 ### Phase 9 - End-to-end verify
 
-**Tier:** the ops role from Phase 8. This phase uses the OpenSearch UI only, so it has no Setup block.
+**Tier:** the ops role from Phase 8. **Needs:** Phases 6, 7, and 8. Uses the OpenSearch UI only, so there is no Setup.
 
-Confirms both pipelines are delivering documents. Generate traffic first: request a few URLs under `/data` through the CloudFront distribution. The real-time log config is attached to the `/data*` and `/data/store/img*` cache behaviors.
+**Steps**
 
-In OpenSearch UI **Dev Tools**:
+1. Request a few URLs under `/data` through the CloudFront distribution.
+2. In OpenSearch UI **Dev Tools**, run:
 
-```text
-GET _cat/indices?v
-```
+   ```text
+   GET _cat/indices?v
+   ```
 
-Expected: the streaming index appears within minutes of traffic. The batch index appears after Logstash processes the next delivered log files.
+**Verify**
 
-| Pipeline | Index | Check |
-|---|---|---|
-| Streaming | `pds-o11y-cloudfront-streaming-index*` (one per day) | `docs.count` grows when you re-run the command |
-| Batch | `<INDEX_PREFIX>-YYYY-MM` (one per month; the prefix is set in the Logstash environment) | `docs.count` is greater than 0 |
+| Pipeline | Expect |
+|---|---|
+| Streaming | Index `pds-o11y-cloudfront-streaming-index*` (one per day) appears within minutes. `docs.count` grows on re-run. |
+| Batch | Index `<INDEX_PREFIX>-YYYY-MM` (one per month) appears after Logstash processes the next delivered log files. `docs.count` is greater than 0. |
 
-If an index is missing, find the failing hop:
+**If an index is missing**
 
-| Missing | Check | Where |
-|---|---|---|
-| Streaming index | Real-time log config attached and distribution deployed (Phase 6); Firehose delivery errors | [streaming Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#troubleshooting) |
-| Batch index | Logstash service, pipeline stats, bad-log file | batch [Operations Runbook](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/docs/operations.md#monitoring) |
+| Missing | Check |
+|---|---|
+| Streaming | Log config attached and distribution deployed (Phase 6); Firehose delivery errors. See [streaming troubleshooting](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#troubleshooting). |
+| Batch | Logstash service, pipeline stats, bad-log file. See [Monitoring](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/docs/operations.md#monitoring). |
 
 ## Updating
 
@@ -651,7 +687,7 @@ Run each smoke test in its phase of the initial deployment, and again after any 
 
 ## Teardown
 
-Destroying the domain deletes all indexed data and is irreversible. Destroy in reverse phase order, because roles must outlive the resources that use them. Use the same permission tier as the phase that created each resource. Per-component notes are in each repo's README.
+Irreversible: this deletes all indexed data. Destroy in reverse phase order, using the tier that created each resource.
 
 **Setup**
 
@@ -667,50 +703,57 @@ export AWS_DEFAULT_REGION="${REGION}"
 cd "${CDS_INFRA_DEPLOY_DIR}"
 ```
 
-**1. Turn off the CloudFront integration (Platform Engineer).** Set `enable_o11y_batch` and `enable_o11y_streaming` to `false` in `venues/<venue>/pdc-cds-infra/cloudfront/pds-main/terragrunt.hcl`, then:
+**Steps**
 
-```bash
-eval $(aws configure export-credentials --profile "${PROFILE_PLATFORM_ENGINEER}" --format env)
-unset AWS_PROFILE
+1. Turn off the CloudFront integration (Platform Engineer). Set `enable_o11y_batch` and `enable_o11y_streaming` to `false` in `venues/<venue>/pdc-cds-infra/cloudfront/pds-main/terragrunt.hcl`, then:
 
-task plan  VENUE="${VENUE}" COMPONENT=pdc-cds-infra/cloudfront/pds-main
-task apply VENUE="${VENUE}" COMPONENT=pdc-cds-infra/cloudfront/pds-main
-```
+   ```bash
+   eval $(aws configure export-credentials --profile "${PROFILE_PLATFORM_ENGINEER}" --format env)
+   unset AWS_PROFILE
 
-**2. Destroy the streaming stack and the batch Logstash (Platform Engineer).**
+   task plan  VENUE="${VENUE}" COMPONENT=pdc-cds-infra/cloudfront/pds-main
+   task apply VENUE="${VENUE}" COMPONENT=pdc-cds-infra/cloudfront/pds-main
+   ```
 
-```bash
-task destroy VENUE="${VENUE}" COMPONENT=o11y-cloudfront-streaming/streaming
-task destroy VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/logstash
-```
+2. Destroy streaming and Logstash (Platform Engineer):
 
-**3. Destroy the batch bucket (Power User).**
+   ```bash
+   task destroy VENUE="${VENUE}" COMPONENT=o11y-cloudfront-streaming/streaming
+   task destroy VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/logstash
+   ```
 
-```bash
-eval $(aws configure export-credentials --profile "${PROFILE_POWER_USER}" --format env)
-unset AWS_PROFILE
+3. Destroy the batch bucket (Power User):
 
-task destroy VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/s3
-```
+   ```bash
+   eval $(aws configure export-credentials --profile "${PROFILE_POWER_USER}" --format env)
+   unset AWS_PROFILE
 
-**4. Destroy the IAM roles (Admin).**
+   task destroy VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/s3
+   ```
 
-```bash
-eval $(aws configure export-credentials --profile "${PROFILE_ADMIN}" --format env)
-unset AWS_PROFILE
+4. Destroy the IAM roles (Admin):
 
-task destroy VENUE="${VENUE}" COMPONENT=o11y-cloudfront-streaming/iam
-task destroy VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/iam
-```
+   ```bash
+   eval $(aws configure export-credentials --profile "${PROFILE_ADMIN}" --format env)
+   unset AWS_PROFILE
 
-**5. Destroy the domain (Power User).**
+   task destroy VENUE="${VENUE}" COMPONENT=o11y-cloudfront-streaming/iam
+   task destroy VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/iam
+   ```
 
-```bash
-eval $(aws configure export-credentials --profile "${PROFILE_POWER_USER}" --format env)
-unset AWS_PROFILE
+5. Destroy the domain (Power User):
 
-task destroy VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
-```
+   ```bash
+   eval $(aws configure export-credentials --profile "${PROFILE_POWER_USER}" --format env)
+   unset AWS_PROFILE
+
+   task destroy VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
+   ```
+
+**Notes**
+
+- Roles must outlive the resources that use them, so IAM is destroyed after the resources.
+- Per-component notes are in each repo's README.
 
 ## Architecture notes
 
