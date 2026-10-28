@@ -73,7 +73,6 @@ Gather these values before Phase 1. Every phase opens with a **Setup** block tha
 | `PROFILE_NAME` | AWS CLI profile for the phase's permission tier | Your profile for that tier; see [Required AWS permissions](#required-aws-permissions) |
 | `CDS_INFRA_DEPLOY_DIR` | Local `cds-infra-deploy` checkout | The path to your clone |
 | `O11Y_PLATFORM_DIR` | Local `o11y-platform` checkout | The path to your clone |
-| `O11Y_STREAMING_DIR` | Local `o11y-cloudfront-streaming` checkout | The path to your clone |
 
 Terraform's S3 backend needs exported credentials with `AWS_PROFILE` unset. Each Setup block does this with `aws configure export-credentials`. Credentials expire after about an hour; re-run the Setup block if a command reports expired credentials.
 
@@ -379,7 +378,7 @@ Expect: a `sg-` ID, then `ACTIVE`.
 
 - Firehose cannot write to the domain until Phase 5.
 
-### Phase 5 - Grant consumers OpenSearch access
+### Phase 5 - Grant Consumers OpenSearch access
 
 **Tier:** Power User. **Needs:** Phases 2a, 2b, 3, and 4. **Time:** seconds. **Does:** the second `opensearch` apply. Adds both consumer roles to the access policy and both security groups to the ingress rules.
 
@@ -463,7 +462,6 @@ VENUE="dev"                                       # dev | test | prod
 REGION="us-west-2"
 PROFILE_NAME="<platform-engineer-sso-profile>"
 CDS_INFRA_DEPLOY_DIR="<path-to-cds-infra-deploy-checkout>"
-O11Y_STREAMING_DIR="<path-to-o11y-cloudfront-streaming-checkout>"
 
 eval $(aws configure export-credentials --profile "${PROFILE_NAME}" --format env)
 unset AWS_PROFILE
@@ -491,26 +489,40 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 **Verify**
 
-```bash
-aws cloudfront list-realtime-log-configs \
-  --query 'RealtimeLogConfigs.Items[].Name' --output text
+1. Check the log config and bucket policy:
 
-aws s3api get-bucket-policy --bucket "pds-logs-${VENUE}" \
-  --query Policy --output text
-```
+   ```bash
+   aws cloudfront list-realtime-log-configs \
+     --query 'RealtimeLogConfigs.Items[].Name' --output text
 
-Expect: `pds-cloudfront-realtime-log-config` is listed. The bucket policy contains `AllowO11yBatchLogstashRead` and `AllowFirehoseWrite`.
+   aws s3api get-bucket-policy --bucket "pds-logs-${VENUE}" \
+     --query Policy --output text
+   ```
 
-**Verify** (streaming smoke test)
+   Expect: `pds-cloudfront-realtime-log-config` is listed. The bucket policy contains `AllowO11yBatchLogstashRead` and `AllowFirehoseWrite`.
 
-Wait for the distribution to finish deploying (several minutes), then follow [Verify](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#verify) in the streaming repo.
+2. Wait until the distribution is `Deployed`:
+
+   ```bash
+   DIST_ID=$(aws cloudfront list-distributions-by-realtime-log-config \
+     --realtime-log-config-name pds-cloudfront-realtime-log-config \
+     --query 'DistributionList.Items[0].Id' --output text)
+   aws cloudfront get-distribution --id "${DIST_ID}" \
+     --query Distribution.Status --output text
+   ```
+
+   Expect: `Deployed`. On `InProgress`, wait and re-run.
+
+3. Run the streaming smoke test, `scripts/smoke-test-realtime-stream.sh` in o11y-cloudfront-streaming: follow [Verify](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#verify).
+
+   Expect: `PASS`.
 
 **Notes**
 
 - Runs last so the stream exists, OpenSearch accepts both consumers, and a rollback is setting both flags to `false`.
 - `enable_o11y_batch` is needed only if `S3_CF_BUCKET_NAME` is set.
 - The bucket policy check needs `s3:GetBucketPolicy`.
-- The smoke test stops at Kinesis. OpenSearch delivery is checked in [Phase 9](#phase-9---end-to-end-verify).
+- The streaming smoke test stops at Kinesis. OpenSearch delivery is checked in [Phase 9](#phase-9---end-to-end-verify).
 
 ### Phase 7 - Deploy Logstash and verify
 
@@ -521,11 +533,11 @@ Wait for the distribution to finish deploying (several minutes), then follow [Ve
 1. Reach the instance: [Access model](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#access-model).
 2. Deploy Logstash: [First-boot setup](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#first-boot-setup).
 
-**Verify** (Logstash smoke test)
+**Verify**
 
-Follow [Smoke test](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#3-smoke-test) in the batch repo.
+1. Run the Logstash smoke test, `scripts/smoke-test.sh` on the EC2, after the deploy: follow [Smoke test](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#3-smoke-test).
 
-Expect: exit code 0 and `PASS` on every check.
+   Expect: exit code 0 and `PASS` on every check.
 
 **If it fails**
 
@@ -651,9 +663,9 @@ Run each smoke test in its phase of the initial deployment, and again after any 
 
 | Smoke test | Run it | Procedure |
 |---|---|---|
-| OpenSearch domain | [Phase 1](#phase-1---bootstrap-opensearch), after the apply. Again after any `opensearch` apply that changes the domain. | [Phase 1 Verify](#phase-1---bootstrap-opensearch) (this repo) |
-| Streaming | [Phase 6](#phase-6---cloudfront-pds-main), after the distribution finishes deploying. Again after changing the log config, the Kinesis stream, or Firehose. | [o11y-cloudfront-streaming: Verify](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#verify) |
-| Logstash | [Phase 7](#phase-7---deploy-logstash-and-verify), after the Logstash deploy and Phase 5. Again after each Logstash deploy. | [o11y-cloudfront-batch: Smoke test](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#3-smoke-test) |
+| OpenSearch domain (`smoke-test.sh`) | [Phase 1](#phase-1---bootstrap-opensearch), after the apply. Again after any `opensearch` apply that changes the domain. | [Phase 1 Verify](#phase-1---bootstrap-opensearch) (this repo) |
+| Streaming (`smoke-test-realtime-stream.sh`) | [Phase 6](#phase-6---cloudfront-pds-main), after the distribution finishes deploying. Again after changing the log config, the Kinesis stream, or Firehose. | [o11y-cloudfront-streaming: Verify](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#verify) |
+| Logstash (`smoke-test.sh`, on the EC2) | [Phase 7](#phase-7---deploy-logstash-and-verify), after the Logstash deploy and Phase 5. Again after each Logstash deploy. | [o11y-cloudfront-batch: Smoke test](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#3-smoke-test) |
 
 ### Other checks
 
