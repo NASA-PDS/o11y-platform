@@ -15,7 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Shared infrastructure dependency — pdc-cds-infra:**
 
-This repo depends on [pdc-cds-infra](https://github.com/NASA-PDS/pdc-cds-infra) (checked out at `/Users/jpadams/proj/pds/pdsen/workspace/pdc-cds-infra` locally). It is the shared infra layer for the PDS CDS ecosystem, deployed in the same AWS account and region. It owns the VPC and the CloudFront distribution (`terraform/cloudfront/pds-main/`) that later phases enable for o11y. **Do not create Cognito or Dashboards resources here** — ops access is the AWS-hosted OpenSearch UI Application (manual; see `terraform/README.md#opensearch-ui-application`). Fine-grained access control stays off.
+This repo depends on [pdc-cds-infra](https://github.com/NASA-PDS/pdc-cds-infra) (checked out at `/Users/jpadams/proj/pds/pdsen/workspace/pdc-cds-infra` locally). It is the shared infra layer for the PDS CDS ecosystem, deployed in the same AWS account and region. It owns the VPC and the CloudFront distribution (`terraform/cloudfront/pds-main/`) that later phases enable for o11y. **Do not create Cognito or Dashboards resources here** — ops access is the AWS-hosted OpenSearch UI Application (manual; see `terraform/README.md#phase-8---opensearch-ui-application`). Fine-grained access control stays off.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -29,9 +29,8 @@ This repo depends on [pdc-cds-infra](https://github.com/NASA-PDS/pdc-cds-infra) 
 │  OpenSearch domain (VPC-only)                                               │
 │  Ingress: EC2 (always) + Firehose (if o11y_cloudfront_streaming_enabled)    │
 │  Ops UI: OpenSearch UI Application (manual, not Terraform)                  │
-│  SSM outputs: /pds/o11y-platform/opensearch/opensearch_endpoint             │
-│               /pds/o11y-platform/opensearch/opensearch_arn                  │
-│               /pds/o11y-platform/opensearch/opensearch_security_group_id    │
+│  SSM outputs: endpoint, ARN, security group ID                              │
+│                (paths: terraform/README.md#ssm-contract)                    │
 └────────────┬──────────────────────────────┬────────────────────────────────┘
              │ reads endpoint/ARN via SSM   │ this module reads Firehose
              ▼                              │ role ARN + SG ID when enabled
@@ -70,10 +69,10 @@ terraform/
   │   ├── provider.tf              # default_tags: tenant/venue/component/managedby/cicd
   │   ├── backend.tf               # S3 backend key (pinned; bucket/region from Terragrunt)
   │   └── tfvars/
-  │       ├── dev.tfvars.example   # Template — copy to <venue>.tfvars (gitignored) for LOCAL=1
+  │       ├── dev.tfvars.example   # Reference inputs for standalone Terraform only (not the operational path)
   │       ├── test.tfvars.example
   │       └── prod.tfvars.example
-  ├── Taskfile.yaml                # Local fallback runner for opensearch:* commands
+  ├── Taskfile.yaml                # Standalone Terraform runner for opensearch:* commands (not the operational path)
   └── .taskrc.yaml                 # interactive: true (enables VENUE enum prompting)
 ```
 
@@ -83,12 +82,12 @@ There are no `backend-*.hcl` files in this repo. Real deploys get bucket/region/
 
 Primary path: set Terragrunt inputs in `cds-infra-deploy` (`venues/<venue>/o11y-platform/opensearch/terragrunt.hcl`). Leave `o11y_cloudfront_batch_enabled` / `o11y_cloudfront_streaming_enabled` false for a first deploy — see Key design decisions for the flip sequence.
 
-Local Task fallback (iteration only):
+Standalone Terraform (reference only; dev, test, and prod are always deployed with Terragrunt):
 
 ```bash
 cd terraform/
 cp opensearch/tfvars/dev.tfvars.example opensearch/tfvars/dev.tfvars
-# Edit dev.tfvars: set domain_name, vpc_id, vpc_subnet_ids, ec2_security_group_name
+# Edit dev.tfvars (gitignored): set domain_name, vpc_id, vpc_subnet_ids
 ```
 
 ### Deployment commands
@@ -102,19 +101,19 @@ task apply   VENUE=dev COMPONENT=o11y-platform/opensearch   # ~15-20 min for dom
 task destroy VENUE=dev COMPONENT=o11y-platform/opensearch   # destroys all indexed data — irreversible
 ```
 
-Local Task fallback (this repo; `LOCAL=1` uses gitignored tfvars):
+Standalone Terraform (this repo; reads the gitignored `opensearch/tfvars/<venue>.tfvars`; not used for operational deployments):
 
 ```bash
 cd terraform/
-task opensearch:init      VENUE=dev LOCAL=1
+task opensearch:init      VENUE=dev
 task opensearch:validate
-task opensearch:plan      VENUE=dev LOCAL=1
-task opensearch:deploy    VENUE=dev LOCAL=1
+task opensearch:plan      VENUE=dev
+task opensearch:deploy    VENUE=dev
 task opensearch:endpoint
-task opensearch:refresh   VENUE=dev LOCAL=1
-task opensearch:sync      VENUE=dev LOCAL=1
+task opensearch:refresh   VENUE=dev
+task opensearch:sync      VENUE=dev
 task opensearch:show      VENUE=dev
-task opensearch:destroy   VENUE=dev LOCAL=1
+task opensearch:destroy   VENUE=dev
 ```
 
 `VENUE` must be one of `dev`, `test`, `prod` (enforced by Task via `.taskrc.yaml` interactive enum prompting if omitted). Run `task --list` from `terraform/` to see the full local command list.
@@ -123,13 +122,13 @@ CI (`.github/workflows/terraform_cicd.yaml`) currently only runs `terraform fmt`
 
 ### Key design decisions
 
-- **SSM decoupling** — the OpenSearch endpoint, domain ARN, and security group ID are published to `/pds/o11y-platform/opensearch/opensearch_endpoint`, `/pds/o11y-platform/opensearch/opensearch_arn`, and `/pds/o11y-platform/opensearch/opensearch_security_group_id` after deploy. Consumers read these at plan time (the ARN is consumed by o11y-cloudfront-batch's `iam/policies` module to scope IAM permissions); no shared Terraform state or cross-repo module references.
-- **Access policy via `*_enabled` flags, not manual SSM seeding** — EC2 and Firehose role ARNs are read from SSM at plan time (`/pds/o11y-cloudfront-batch/iam/ec2_role_arn`, `/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn`), but each lookup — and its entry in the access policy's `Principal.AWS` — is gated behind `o11y_cloudfront_batch_enabled` / `o11y_cloudfront_streaming_enabled` (both default `false`). This lets the domain bootstrap before either consumer exists: deploy with both false, deploy the consumers (each reads the domain's SSM outputs immediately), then flip the relevant flag to `true` and re-apply here — an access-policy-only update, no domain redeployment. `aws_opensearch_domain_policy` isn't created at all while both flags are false. See `terraform/README.md#deployment-flow` for the full sequence.
-- **VPC-only** — no public endpoint. OpenSearch is accessible only from within the VPC via security group rules (`aws_security_group.opensearch`, created only when `vpc_enabled = true`). Both ingress rules live in this module: the EC2 rule (unconditional; MCP EC2 SG is pre-existing shared infra) and the Firehose rule (gated on `o11y_cloudfront_streaming_enabled && vpc_enabled`; reads the Firehose SG ID from SSM at plan time).
+- **SSM decoupling** — the OpenSearch endpoint, domain ARN, and security group ID are published to SSM after deploy, and consumers read them at plan time; no shared Terraform state or cross-repo module references. The parameter paths, and which repos publish and read each, are in `terraform/README.md#ssm-contract`.
+- **Access policy via `*_enabled` flags, not manual SSM seeding** — EC2 and Firehose role ARNs and the Logstash and Firehose security group IDs are read from SSM at plan time (paths: `terraform/README.md#ssm-contract`), but each lookup — and its entry in the access policy's `Principal.AWS` — is gated behind `o11y_cloudfront_batch_enabled` / `o11y_cloudfront_streaming_enabled` (both default `false`). This lets the domain bootstrap before either consumer exists: deploy with both false, deploy the consumers (each reads the domain's SSM outputs immediately), then flip the relevant flag to `true` and re-apply here (so `opensearch` is always applied twice) — an access-policy and ingress-rule update only, no domain redeployment. Enabling a flag before its consumer has published those SSM parameters fails the plan. `aws_opensearch_domain_policy` isn't created at all while there are no principals (both flags false and `ops_role_arns` empty). `ops_role_arns` adds operator IAM role ARNs (IAM role form, not assumed-role/STS) to the same `es:ESHttp*` statement. See `terraform/README.md#deployment-flow` for the full sequence.
+- **VPC-only** — no public endpoint. OpenSearch is accessible only from within the VPC via security group rules (`aws_security_group.opensearch`, created only when `vpc_enabled = true`). Both ingress rules live in this module: the Logstash rule (gated on `o11y_cloudfront_batch_enabled && vpc_enabled`; reads the Logstash SG ID from SSM at plan time) and the Firehose rule (gated on `o11y_cloudfront_streaming_enabled && vpc_enabled`; reads the Firehose SG ID from SSM at plan time).
 - **`lifecycle { ignore_changes = [tags] }`** on the OpenSearch SG — suppresses drift from AWS Config auto-tagging.
 - **State** — S3 backend, key `o11y-platform/opensearch.tfstate`. Bucket/region/lock come from Terragrunt in `cds-infra-deploy`, not from `backend-*.hcl` files in this repo.
 - **dev vs prod sizing** — dev uses single-node, no dedicated masters, no zone awareness (`t3.medium.search`); prod-like venues should enable `dedicated_master_enabled` and `zone_awareness_enabled` with matching subnet/AZ counts.
-- **Ops access via OpenSearch UI Application** — not Cognito and not the built-in `/_dashboards` endpoint. There is no `dashboards_enabled` flag and no `cognito_options` on the domain; `advanced_security_options.enabled` stays `false`. After the domain exists, authorize `application.opensearchservice.amazonaws.com` and create the UI Application in the console. See `terraform/README.md#opensearch-ui-application`.
+- **Ops access via OpenSearch UI Application** — not Cognito and not the built-in `/_dashboards` endpoint. There is no `dashboards_enabled` flag and no `cognito_options` on the domain; `advanced_security_options.enabled` stays `false`. After the domain exists, authorize `application.opensearchservice.amazonaws.com` and create the UI Application in the console. See `terraform/README.md#phase-8---opensearch-ui-application`.
 
 ### Adding a new consumer
 

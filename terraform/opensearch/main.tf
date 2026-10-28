@@ -4,7 +4,7 @@ data "aws_caller_identity" "current" {}
 # see o11y_cloudfront_batch_enabled / o11y_cloudfront_streaming_enabled in variables.tf.
 data "aws_ssm_parameter" "ec2_role_arn" {
   count = var.o11y_cloudfront_batch_enabled ? 1 : 0
-  name  = "/pds/o11y-cloudfront-batch/iam/ec2_role_arn"
+  name  = "/pds/o11y-cloudfront-batch/iam/roles/ec2/instance-role-arn"
 }
 
 data "aws_ssm_parameter" "firehose_role_arn" {
@@ -12,10 +12,11 @@ data "aws_ssm_parameter" "firehose_role_arn" {
   name  = "/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn"
 }
 
-data "aws_security_group" "mcp_ec2" {
-  count  = var.vpc_enabled ? 1 : 0
-  name   = var.ec2_security_group_name
-  vpc_id = var.vpc_id
+# Published by o11y-cloudfront-batch's logstash module, so it only exists once that module
+# has been applied. Gated on the same flag as the role ARN above.
+data "aws_ssm_parameter" "logstash_security_group_id" {
+  count = var.vpc_enabled && var.o11y_cloudfront_batch_enabled ? 1 : 0
+  name  = "/pds/o11y-cloudfront-batch/ec2/logstash_security_group_id"
 }
 
 data "aws_ssm_parameter" "firehose_security_group_id" {
@@ -30,6 +31,7 @@ locals {
   opensearch_access_principals = concat(
     var.o11y_cloudfront_batch_enabled ? [data.aws_ssm_parameter.ec2_role_arn[0].value] : [],
     var.o11y_cloudfront_streaming_enabled ? [data.aws_ssm_parameter.firehose_role_arn[0].value] : [],
+    var.ops_role_arns,
   )
 }
 
@@ -58,16 +60,16 @@ resource "aws_security_group" "opensearch" {
   }
 }
 
-resource "aws_vpc_security_group_ingress_rule" "opensearch_https_from_ec2" {
-  count                        = var.vpc_enabled ? 1 : 0
+resource "aws_vpc_security_group_ingress_rule" "opensearch_https_from_logstash" {
+  count                        = var.vpc_enabled && var.o11y_cloudfront_batch_enabled ? 1 : 0
   security_group_id            = aws_security_group.opensearch[0].id
-  referenced_security_group_id = data.aws_security_group.mcp_ec2[0].id
+  referenced_security_group_id = data.aws_ssm_parameter.logstash_security_group_id[0].value
 
   from_port   = 443
   to_port     = 443
   ip_protocol = "tcp"
 
-  description = "Allow HTTPS from the Logstash EC2 security group."
+  description = "Allow HTTPS from the o11y-cloudfront-batch Logstash security group."
 }
 
 resource "aws_vpc_security_group_ingress_rule" "opensearch_https_from_firehose" {
@@ -143,8 +145,9 @@ resource "aws_opensearch_domain" "this" { #NOSONAR
 
 
 
-# Absent until at least one consumer is enabled — an access policy with an
-# empty Principal.AWS is invalid, and on the initial bootstrap deploy no role ARNs exist in SSM yet.
+# Absent until at least one principal exists (an enabled consumer or an entry in ops_role_arns) —
+# an access policy with an empty Principal.AWS is invalid, and on the initial bootstrap deploy no
+# consumer role ARNs exist in SSM yet.
 resource "aws_opensearch_domain_policy" "this" {
   count       = length(local.opensearch_access_principals) > 0 ? 1 : 0
   domain_name = var.domain_name

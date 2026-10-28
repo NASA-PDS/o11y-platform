@@ -101,15 +101,9 @@ variable "vpc_subnet_ids" {
   default     = []
 }
 
-variable "ec2_security_group_name" {
-  type        = string
-  description = "Name of the MCP EC2 security group. Used to allow 443 inbound to the OpenSearch domain. Required when vpc_enabled = true."
-  default     = ""
-}
-
 variable "o11y_cloudfront_batch_enabled" {
   type        = bool
-  description = "Whether the o11y-cloudfront-batch consumer has been deployed. When true, its Logstash EC2 role ARN is read from SSM (/pds/o11y-cloudfront-batch/iam/ec2_role_arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before o11y-cloudfront-batch's iam/policies module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment."
+  description = "Whether the o11y-cloudfront-batch consumer has been deployed. When true, its Logstash EC2 role ARN is read from SSM (/pds/o11y-cloudfront-batch/iam/roles/ec2/instance-role-arn) and added as an OpenSearch access-policy principal, and its Logstash SG ID is read from SSM (/pds/o11y-cloudfront-batch/ec2/logstash_security_group_id) to create the Logstash→OpenSearch VPC ingress rule. Leave false for the initial bootstrap deploy (before o11y-cloudfront-batch's iam and logstash modules have published those parameters), then re-apply with true once both exist — this only updates the access policy and ingress rule, no domain redeployment."
   default     = false
 }
 
@@ -117,6 +111,17 @@ variable "o11y_cloudfront_streaming_enabled" {
   type        = bool
   description = "Whether the o11y-cloudfront-streaming consumer has been deployed. When true, its Firehose role ARN is read from SSM (/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn) and added as an OpenSearch access-policy principal, and its Firehose SG ID is read from SSM (/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id) to create the Firehose→OpenSearch VPC ingress rule. Leave false for the initial bootstrap deploy (before o11y-cloudfront-streaming has published those SSM parameters), then re-apply with true once it exists — this only updates the access policy and ingress rule, no domain redeployment."
   default     = false
+}
+
+variable "ops_role_arns" {
+  type        = list(string)
+  description = "IAM role ARNs of operators granted es:ESHttp* on the domain, in addition to the enabled consumer roles. Used for ops access through the OpenSearch UI Application. Must be IAM role ARNs (arn:<partition>:iam::<account-id>:role/<name>), which match every session of the role; assumed-role/STS ARNs do not match. Leave empty when operators already have es:ESHttp* through their own IAM policy."
+  default     = []
+
+  validation {
+    condition     = alltrue([for arn in var.ops_role_arns : can(regex("^arn:[a-z-]+:iam::[0-9]{12}:role/.+$", arn))])
+    error_message = "ops_role_arns entries must be IAM role ARNs of the form arn:<partition>:iam::<account-id>:role/<name>. Assumed-role (arn:...:sts::...) ARNs are not valid principals here."
+  }
 }
 
 variable "venue" {
