@@ -121,18 +121,24 @@ inputs = {
 }
 ```
 
-Deploy from a `cds-infra-deploy` checkout with the credentials and variables from the runbook [Prerequisites](../README.md#prerequisites). The bootstrap apply is [Phase 1](../README.md#phase-1---bootstrap-opensearch) and the consumer re-apply is [Phase 5](../README.md#phase-5---grant-consumers-opensearch-access).
+Deploy it from the runbook. The bootstrap apply is [Phase 1](../README.md#phase-1---bootstrap-opensearch) and the consumer re-apply is [Phase 5](../README.md#phase-5---grant-consumers-opensearch-access). Each phase's Setup block assigns the variables, exports the credentials, and changes into the `cds-infra-deploy` checkout.
 
 ### Standalone Terraform (reference only, not the operational path)
 
 The `tfvars/*.tfvars.example` files are a reference for the inputs the module takes when it is
 run as plain Terraform, outside Terragrunt. They are not how dev, test, or prod are deployed
 and are not kept in step with the venue values in `cds-infra-deploy`. Use them to try the module
-in a scratch account, or as a checklist of the inputs a Terragrunt `inputs` block needs. Export
-credentials as described in the runbook [Prerequisites](../README.md#prerequisites) first.
+in a scratch account, or as a checklist of the inputs a Terragrunt `inputs` block needs.
 
 ```bash
-cd terraform/
+PROFILE_NAME="<sso-profile>"
+O11Y_PLATFORM_DIR="<path-to-o11y-platform-checkout>"
+
+# The Terraform S3 backend needs exported credentials with AWS_PROFILE unset.
+eval $(aws configure export-credentials --profile "${PROFILE_NAME}" --format env)
+unset AWS_PROFILE
+
+cd "${O11Y_PLATFORM_DIR}/terraform"
 cp opensearch/tfvars/dev.tfvars.example opensearch/tfvars/dev.tfvars
 # edit dev.tfvars (gitignored): fill in domain_name, vpc_id, vpc_subnet_ids
 
