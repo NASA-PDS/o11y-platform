@@ -5,7 +5,7 @@
 # Usage:
 #   bash scripts/smoke-test.sh <dev|test|prod>
 #
-# Requires python3 (parses AWS CLI JSON) and exported AWS credentials
+# Requires jq (parses AWS CLI JSON) and exported AWS credentials
 # (not AWS_PROFILE — use eval $(aws configure export-credentials ...)):
 #   eval $(aws configure export-credentials --profile <your-profile> --format env)
 #   unset AWS_PROFILE
@@ -20,6 +20,10 @@ FAIL=0
 
 pass() { echo "  PASS  $1"; PASS=$((PASS + 1)); }
 fail() { echo "  FAIL  $1"; FAIL=$((FAIL + 1)); }
+
+# json_field <json> <key>: print a top-level field. A missing key is an error (aborting the
+# script under set -e) so a change in the AWS response shape surfaces instead of being masked.
+json_field() { jq -r --arg key "$2" 'if has($key) then .[$key] else error("missing field: " + $key) end' <<<"$1"; }
 
 echo "== SSM parameters (venue: $VENUE) =="
 
@@ -79,16 +83,16 @@ else
   if [[ -z "$DOMAIN_JSON" ]]; then
     fail "describe-domain: domain $DOMAIN_NAME not found"
   else
-    CREATED=$(echo "$DOMAIN_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['Created'])" 2>/dev/null || echo "false")
-    PROCESSING=$(echo "$DOMAIN_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['Processing'])" 2>/dev/null || echo "true")
+    CREATED=$(json_field "$DOMAIN_JSON" Created)
+    PROCESSING=$(json_field "$DOMAIN_JSON" Processing)
 
-    if [[ "$CREATED" == "True" ]]; then
+    if [[ "$CREATED" == "true" ]]; then
       pass "domain created: $DOMAIN_NAME"
     else
       fail "domain not yet created: $DOMAIN_NAME"
     fi
 
-    if [[ "$PROCESSING" == "False" ]]; then
+    if [[ "$PROCESSING" == "false" ]]; then
       pass "domain not processing (stable)"
     else
       fail "domain is currently processing (mid-update or still provisioning)"
@@ -111,9 +115,9 @@ else
   if [[ -z "$HEALTH_JSON" ]]; then
     fail "describe-domain-health: no response for $DOMAIN_NAME"
   else
-    HEALTH=$(echo "$HEALTH_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['ClusterHealth'])" 2>/dev/null || echo "Unknown")
-    NODES=$(echo "$HEALTH_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['DataNodeCount'])" 2>/dev/null || echo "?")
-    UNASSIGNED=$(echo "$HEALTH_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['TotalUnAssignedShards'])" 2>/dev/null || echo "?")
+    HEALTH=$(json_field "$HEALTH_JSON" ClusterHealth)
+    NODES=$(json_field "$HEALTH_JSON" DataNodeCount)
+    UNASSIGNED=$(json_field "$HEALTH_JSON" TotalUnAssignedShards)
 
     if [[ "$HEALTH" == "Green" || "$HEALTH" == "Yellow" ]]; then
       pass "cluster health: status=$HEALTH nodes=$NODES unassigned_shards=$UNASSIGNED"

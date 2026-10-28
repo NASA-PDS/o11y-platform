@@ -60,7 +60,7 @@ flowchart LR
 
 ## Prerequisites
 
-Tools: [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.10.0, [Terragrunt](https://terragrunt.gruntwork.io/docs/getting-started/install/) >= 0.55, [Task](https://taskfile.dev) (`brew install go-task/tap/go-task`), and the AWS CLI.
+Tools: [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.10.0, [Terragrunt](https://terragrunt.gruntwork.io/docs/getting-started/install/) >= 0.55, [Task](https://taskfile.dev) (`brew install go-task/tap/go-task`), [jq](https://jqlang.org) (used by `scripts/smoke-test.sh`), and the AWS CLI.
 
 Checkouts: `cds-infra-deploy` (all venue inputs live there as `venues/<venue>/<repo>/<module>/terragrunt.hcl`), this repo (for `scripts/smoke-test.sh`), and `o11y-cloudfront-streaming` (for its Kinesis smoke test in Phase 6).
 
@@ -742,14 +742,36 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
    task apply VENUE="${VENUE}" COMPONENT=pdc-cds-infra/cloudfront/pds-main
    ```
 
-2. Destroy streaming and Logstash (Platform Engineer):
+2. Revoke the consumers' OpenSearch access (Power User). Set both flags to `false` in `venues/<venue>/o11y-platform/opensearch/terragrunt.hcl`:
+
+   ```hcl
+   o11y_cloudfront_batch_enabled     = false
+   o11y_cloudfront_streaming_enabled = false
+   ```
+
+   Then:
 
    ```bash
+   eval $(aws configure export-credentials --profile "${PROFILE_POWER_USER}" --format env)
+   unset AWS_PROFILE
+
+   task plan  VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
+   task apply VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
+   ```
+
+   Expect: the consumer role ARNs leave the access policy and the two ingress rules are destroyed. No `aws_opensearch_domain.this` replacement.
+
+3. Destroy streaming and Logstash (Platform Engineer):
+
+   ```bash
+   eval $(aws configure export-credentials --profile "${PROFILE_PLATFORM_ENGINEER}" --format env)
+   unset AWS_PROFILE
+
    task destroy VENUE="${VENUE}" COMPONENT=o11y-cloudfront-streaming/streaming
    task destroy VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/logstash
    ```
 
-3. Destroy the batch bucket (Power User):
+4. Destroy the batch bucket (Power User):
 
    ```bash
    eval $(aws configure export-credentials --profile "${PROFILE_POWER_USER}" --format env)
@@ -758,7 +780,7 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
    task destroy VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/s3
    ```
 
-4. Destroy the IAM roles (Admin):
+5. Destroy the IAM roles (Admin):
 
    ```bash
    eval $(aws configure export-credentials --profile "${PROFILE_ADMIN}" --format env)
@@ -768,7 +790,7 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
    task destroy VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/iam
    ```
 
-5. Destroy the domain (Power User):
+6. Destroy the domain (Power User):
 
    ```bash
    eval $(aws configure export-credentials --profile "${PROFILE_POWER_USER}" --format env)
@@ -780,6 +802,7 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 **Notes**
 
 - Roles must outlive the resources that use them, so IAM is destroyed after the resources.
+- Step 2 comes first because `opensearch` reads the consumer role ARNs and security group IDs from SSM while a flag is `true`, and the OpenSearch security group has ingress rules that reference the consumer security groups. Destroying a consumer first leaves those lookups failing and blocks deletion of the referenced security group.
 - Per-component notes are in each repo's README.
 
 ## Architecture notes
