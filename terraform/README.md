@@ -62,7 +62,7 @@ flowchart LR
 
 Tools: [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.10.0, [Terragrunt](https://terragrunt.gruntwork.io/docs/getting-started/install/) >= 0.55, [Task](https://taskfile.dev) (`brew install go-task/tap/go-task`), and the AWS CLI.
 
-Checkouts: `cds-infra-deploy` (all venue inputs live there as `venues/<venue>/<repo>/<module>/terragrunt.hcl`) and this repo (for `scripts/smoke-test.sh`).
+Checkouts: `cds-infra-deploy` (all venue inputs live there as `venues/<venue>/<repo>/<module>/terragrunt.hcl`), this repo (for `scripts/smoke-test.sh`), and `o11y-cloudfront-streaming` (for its Kinesis smoke test in Phase 6).
 
 Set these once per shell session. Every command in this runbook uses them.
 
@@ -72,6 +72,7 @@ REGION="us-west-2"
 PROFILE_NAME="<your-sso-profile>"
 CDS_INFRA_DEPLOY_DIR="<path-to-cds-infra-deploy-checkout>"
 O11Y_PLATFORM_DIR="<path-to-o11y-platform-checkout>"
+O11Y_STREAMING_DIR="<path-to-o11y-cloudfront-streaming-checkout>"
 
 # The Terraform S3 backend needs exported credentials with AWS_PROFILE unset.
 eval $(aws configure export-credentials --profile "${PROFILE_NAME}" --format env)
@@ -369,6 +370,14 @@ aws s3api get-bucket-policy --bucket "pds-logs-${VENUE}" \
 
 Expected: `pds-cloudfront-realtime-log-config` is listed, and the bucket policy contains the Sids `AllowO11yBatchLogstashRead` and `AllowFirehoseWrite`. The second command needs `s3:GetBucketPolicy`. Allow several minutes for the distribution to finish deploying before expecting records.
 
+Then confirm records reach the Kinesis stream:
+
+```bash
+bash "${O11Y_STREAMING_DIR}/scripts/smoke-test-realtime-stream.sh" "${VENUE}"
+```
+
+Expected: `PASS: <n> record(s) reached the Kinesis stream`, within about 3 minutes. The script requests a few URLs under `/data` and polls the stream's `IncomingRecords` metric. On `FAIL`, the distribution may still be deploying; wait and re-run. The script does not check OpenSearch; that is [Phase 9](#phase-9---end-to-end-verify).
+
 ### Phase 7 - Deploy Logstash and verify
 
 **Tier:** shell access to the EC2 as `pdsops`, through the bastion. Needs Phases 3, 5, and 6.
@@ -376,7 +385,7 @@ Expected: `pds-cloudfront-realtime-log-config` is listed, and the bucket policy 
 Installs and starts Logstash on the instance created in Phase 3. This runs on the instance, not through Terragrunt. Follow the batch repo; do not copy its steps here:
 
 1. [Access model](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#access-model) to reach the instance.
-2. [Initialize Logstash on the EC2](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md#step-4-initialize-logstash-on-the-ec2) to deploy.
+2. [First-boot setup](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#first-boot-setup) to deploy.
 3. [Verify the deployment](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#verify-the-deployment).
 
 Expected: `scripts/smoke-test.sh` on the instance reports every check passing. Phases 5 and 6 are already applied, so an OpenSearch or S3 access failure here is a real fault; see the batch [Operations Runbook](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/docs/operations.md#troubleshooting).
@@ -476,9 +485,9 @@ Re-run only the affected phase. Each component README owns the procedure for its
 | OpenSearch engine version, node count, instance type | [opensearch README: Upgrade](opensearch/README.md#upgrade) | Engine upgrade is a blue/green update, about 30 minutes in `Processing` |
 | Consumer role or security group recreated | Re-run [Phase 5](#phase-5---grant-consumers-opensearch-access) | The SSM value changes, so the access policy and ingress rule must follow |
 | Operator roles with domain access | Edit `ops_role_arns`, then [Phase 8, Step 4](#phase-8---opensearch-ui-application) | Access-policy update only |
-| Batch IAM, S3, or Logstash instance | [batch Terraform README: Upgrade](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md#upgrade) | |
-| Logstash pipeline or config | batch [Operations Runbook](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/docs/operations.md) | Test first with the [pipeline test suite](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md) |
-| Streaming Lambda, Kinesis, Firehose, or IAM | [streaming Terraform README: Upgrade](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#upgrade) | |
+| Batch IAM, S3, or Logstash instance | [batch Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md) (each module has an Update note) | A `logstash_version` change replaces the instance |
+| Logstash pipeline config or `regexes.yaml` | batch [Update pipeline configuration](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/docs/operations.md#update-pipeline-configuration) | No Terraform change. Test first with the [pipeline tests](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md#running-the-integration-tests-with-docker) |
+| Streaming Lambda, Kinesis, Firehose, or IAM | [streaming Terraform README: Updating](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#updating) | |
 | CloudFront log wiring or bucket access | pdc-cds-infra [`pds-main` README](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/cloudfront/pds-main/README.md#o11y-integration) | |
 | EC2, S3, or IAM module version | [pdc-tf-modules](https://github.com/NASA-PDS/pdc-tf-modules) | Update the module reference in the consuming component, then re-run its phase |
 
@@ -488,7 +497,7 @@ Re-run only the affected phase. Each component README owns the procedure for its
 |---|---|---|
 | OpenSearch domain | `scripts/smoke-test.sh` ([Phase 1](#phase-1---bootstrap-opensearch)) | After every `opensearch` apply that changes the domain |
 | Cross-repo wiring | Verify steps in Phases 5 and 6 | After changing a flag, role, or security group |
-| Logstash pipeline logic | batch [`tests/README.md`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md) | Before deploying any pipeline change |
+| Logstash pipeline logic | batch [`tests/README.md`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md#running-the-integration-tests-with-docker) | Before deploying any pipeline change |
 | Logstash on the instance | [Verify the deployment](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#verify-the-deployment) | After each Logstash deploy |
 | Data flow, both pipelines | [Phase 9](#phase-9---end-to-end-verify) | After an initial deployment or any change to the path |
 
