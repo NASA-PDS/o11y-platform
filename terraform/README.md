@@ -545,10 +545,8 @@ Expect: exit code 0 and `PASS` on every check.
 **Setup**
 
 ```bash
-VENUE="dev"                                       # dev | test | prod
 REGION="us-west-2"
 PROFILE_NAME="<power-user-sso-profile>"
-CDS_INFRA_DEPLOY_DIR="<path-to-cds-infra-deploy-checkout>"
 
 eval $(aws configure export-credentials --profile "${PROFILE_NAME}" --format env)
 unset AWS_PROFILE
@@ -593,34 +591,14 @@ Launch the application, open **Dev Tools**, and run:
 GET _cluster/health
 ```
 
-Expect: `"status"` is `green` or `yellow`. A 403 means your role is not allowed on the domain: do Step 4.
+Expect: `"status"` is `green` or `yellow`.
 
-**Step 4 - Grant an ops role domain access (only after a 403)**
+**If it fails**
 
-1. Build the role ARN:
-
-   ```bash
-   OPS_ROLE_NAME="<ops-role-name>"
-   ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-   echo "ops_role_arns = [\"arn:aws:iam::${ACCOUNT_ID}:role/${OPS_ROLE_NAME}\"]"
-   ```
-
-2. Add the printed line to the `inputs` block in `${CDS_INFRA_DEPLOY_DIR}/venues/${VENUE}/o11y-platform/opensearch/terragrunt.hcl`. For several roles, list the ARNs in the same array.
-
-3. Plan and apply:
-
-   ```bash
-   cd "${CDS_INFRA_DEPLOY_DIR}"
-   task plan  VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
-   task apply VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
-   ```
-
-4. Re-run Verify.
+- 403 in Dev Tools: your role is not in `ops_role_arns` in the venue's `opensearch/terragrunt.hcl`.
 
 **Notes**
 
-- Use the IAM role ARN as printed. An `arn:...:sts::...:assumed-role/...` ARN fails the plan with `Invalid value for variable "ops_role_arns"`.
-- Each listed role gets `es:ESHttp*` on the whole domain, the same as the consumer roles. There is no read-only or per-index tier, and no control-plane access.
 - No Terraform resource exists yet for the UI Application ([hashicorp/terraform-provider-aws#45082](https://github.com/hashicorp/terraform-provider-aws/issues/45082)) or the VPC authorization ([#41879](https://github.com/hashicorp/terraform-provider-aws/issues/41879)).
 
 ### Phase 9 - End-to-end verify
@@ -658,7 +636,7 @@ Re-run only the affected phase. Each component README owns the procedure for its
 |---|---|---|
 | OpenSearch engine version, node count, instance type | [opensearch README: Upgrade](opensearch/README.md#upgrade) | Engine upgrade is a blue/green update, about 30 minutes in `Processing` |
 | Consumer role or security group recreated | Re-run [Phase 5](#phase-5---grant-consumers-opensearch-access) | The SSM value changes, so the access policy and ingress rule must follow |
-| Operator roles with domain access | Edit `ops_role_arns`, then [Phase 8, Step 4](#phase-8---opensearch-ui-application) | Access-policy update only |
+| Operator roles with domain access | Edit `ops_role_arns` in the venue's `opensearch/terragrunt.hcl`, then re-run [Phase 5](#phase-5---grant-consumers-opensearch-access) | Access-policy update only |
 | Batch IAM, S3, or Logstash instance | [batch Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md) (each module has an Update note) | A `logstash_version` change replaces the instance |
 | Logstash pipeline config or `regexes.yaml` | batch [Update pipeline configuration](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/docs/operations.md#update-pipeline-configuration) | No Terraform change. Test first with the [pipeline tests](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md#running-the-integration-tests-with-docker) |
 | Streaming Lambda, Kinesis, Firehose, or IAM | [streaming Terraform README: Updating](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#updating) | |
