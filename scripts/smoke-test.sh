@@ -111,7 +111,7 @@ else
   if [[ -z "$HEALTH_JSON" ]]; then
     fail "describe-domain-health: no response for $DOMAIN_NAME"
   else
-    HEALTH=$(echo "$HEALTH_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['HealthStatus'])" 2>/dev/null || echo "Unknown")
+    HEALTH=$(echo "$HEALTH_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['ClusterHealth'])" 2>/dev/null || echo "Unknown")
     NODES=$(echo "$HEALTH_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['DataNodeCount'])" 2>/dev/null || echo "?")
     UNASSIGNED=$(echo "$HEALTH_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['TotalUnAssignedShards'])" 2>/dev/null || echo "?")
 
