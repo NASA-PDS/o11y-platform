@@ -148,7 +148,9 @@ Phase 6 runs last, after every component it points at exists. See [Phase 6](#pha
 
 ## Initial deployment
 
-Run the phases in order. In each phase, run **Setup**, then **Steps**, then **Verify**. Do not continue until Verify passes. Phases 1, 6, and 7 end with a smoke test; see [Testing](#testing).
+Run the phases in order. In each phase, run **Setup**, then **Steps**, then **Verify**. Do not continue until Verify passes.
+
+**Total time:** about 1.5 hours. Each phase's **Time** is approximate; the Phase 1 domain creation is the longest single wait. Phases 1, 6, and 7 end with a smoke test; see [Testing](#testing).
 
 ### Phase 1 - Bootstrap OpenSearch
 
@@ -207,6 +209,7 @@ Expect: `All 7 check(s) passed.`
 * **Tier:** Admin.
 * **Needs:** Phase 1.
 * **Order:** 2a and 2b can run in either order.
+* **Time:** about 5 min.
 * **Creates:** the consumer IAM roles; publishes their ARNs to SSM.
 * **Inputs:** [batch `iam`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md), [streaming `iam/`](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/iam/README.md).
 
@@ -293,6 +296,7 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 * **Tier:** 3a Power User, 3b Platform Engineer.
 * **Needs:** Phases 1 and 2a.
+* **Time:** about 10 min. The instance then bootstraps Logstash in the background for 5-10 min.
 * **Creates:** the log bucket (3a) and the Logstash EC2 and its security group (3b). Logstash is installed in Phase 7.
 * **Inputs:** [batch Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md).
 
@@ -348,6 +352,7 @@ Expect: a bucket name, then a `sg-` ID.
 
 * **Tier:** Platform Engineer.
 * **Needs:** Phases 1 and 2b.
+* **Time:** about 5 min.
 * **Creates:** the Kinesis stream, Lambda transform, Firehose delivery stream, and Firehose security group.
 * **Inputs:** [streaming Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md).
 
@@ -472,6 +477,7 @@ Expect:
 
 * **Tier:** Platform Engineer.
 * **Needs:** Phases 2a, 2b, 4, and 5.
+* **Time:** about 15 min, mostly waiting for the distribution to deploy.
 * **Creates:** the CloudFront real-time log config (to Kinesis) and the `AllowO11yBatchLogstashRead` and `AllowFirehoseWrite` statements on the `pds-logs-<venue>` bucket policy.
 * **Inputs:** [pds-main o11y integration](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/cloudfront/pds-main/README.md#o11y-integration).
 
@@ -548,6 +554,7 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 * **Tier:** `pdsops` on the EC2, through the bastion.
 * **Needs:** Phases 3 and 5 (and 6 if `S3_CF_BUCKET_NAME` is set).
+* **Time:** about 10 min, after the Phase 3 bootstrap finishes.
 * **Does:** installs and starts Logstash on the Phase 3 instance.
 * **Inputs:** none here. The batch steps below set their own variables.
 
@@ -577,6 +584,7 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 * **Tier:** Power User.
 * **Needs:** Phase 1.
+* **Time:** about 10 min.
 * **Creates:** the AWS-hosted OpenSearch UI Application with IAM auth.
 * **Mode:** manual (CLI and console).
 
@@ -643,6 +651,7 @@ Expect: `"status"` is `green` or `yellow`.
 
 * **Tier:** the ops role from Phase 8.
 * **Needs:** Phases 6, 7, and 8.
+* **Time:** about 5 min.
 * **Setup:** none. This phase uses the OpenSearch UI only.
 
 **Steps**
