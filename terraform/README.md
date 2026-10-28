@@ -149,7 +149,7 @@ Phase 6 runs last, after every component it points at exists. See [Phase 6](#pha
 
 ## Initial deployment
 
-Complete the phases in order. Run each Verify step and get the expected result before moving on. Each phase starts with a Setup block: edit its values, then run it. It sets the variables the phase uses, exports credentials for the phase's permission tier, and changes into the directory the commands run from.
+Complete the phases in order. Run each Verify step and get the expected result before moving on. Three phases end with a smoke test: Phase 1 (OpenSearch domain), Phase 6 (streaming), and Phase 7 (Logstash). [Testing](#testing) lists when to run each. Each phase starts with a Setup block: edit its values, then run it. It sets the variables the phase uses, exports credentials for the phase's permission tier, and changes into the directory the commands run from.
 
 ### Phase 1 - Bootstrap OpenSearch
 
@@ -162,7 +162,7 @@ Creates the VPC-only domain and its security group, and publishes the endpoint, 
 ```bash
 VENUE="dev"                                       # dev | test | prod
 REGION="us-west-2"
-PROFILE_NAME="<power-user-sso-profile>"
+PROFILE_NAME="<aws-profile-name>"
 CDS_INFRA_DEPLOY_DIR="<path-to-cds-infra-deploy-checkout>"
 O11Y_PLATFORM_DIR="<path-to-o11y-platform-checkout>"
 
@@ -188,7 +188,9 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
    task apply VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
    ```
 
-**Verify**
+**Verify - OpenSearch smoke test**
+
+Run it from your workstation after the apply finishes:
 
 ```bash
 bash "${O11Y_PLATFORM_DIR}/scripts/smoke-test.sh" "${VENUE}"
@@ -207,7 +209,7 @@ Each consumer's `iam` module creates its roles and publishes their ARNs to SSM. 
 ```bash
 VENUE="dev"                                       # dev | test | prod
 REGION="us-west-2"
-PROFILE_NAME="<admin-sso-profile>"
+PROFILE_NAME="<aws-profile-name>"
 CDS_INFRA_DEPLOY_DIR="<path-to-cds-infra-deploy-checkout>"
 
 eval $(aws configure export-credentials --profile "${PROFILE_NAME}" --format env)
@@ -283,30 +285,25 @@ Expected: three ARNs. The Kinesis ARN is computed; the stream itself does not ex
 ```bash
 VENUE="dev"                                       # dev | test | prod
 REGION="us-west-2"
+PROFILE_NAME="<aws-profile-name>"
 CDS_INFRA_DEPLOY_DIR="<path-to-cds-infra-deploy-checkout>"
-PROFILE_POWER_USER="<power-user-sso-profile>"
-PROFILE_PLATFORM_ENGINEER="<platform-engineer-sso-profile>"
 
+eval $(aws configure export-credentials --profile "${PROFILE_NAME}" --format env)
+unset AWS_PROFILE
 export AWS_DEFAULT_REGION="${REGION}"
 cd "${CDS_INFRA_DEPLOY_DIR}"
 ```
 
-**3a - s3 (Power User)**
+**3a - s3**
 
 ```bash
-eval $(aws configure export-credentials --profile "${PROFILE_POWER_USER}" --format env)
-unset AWS_PROFILE
-
 task plan  VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/s3
 task apply VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/s3
 ```
 
-**3b - logstash (Platform Engineer)**
+**3b - logstash**
 
 ```bash
-eval $(aws configure export-credentials --profile "${PROFILE_PLATFORM_ENGINEER}" --format env)
-unset AWS_PROFILE
-
 task plan  VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/logstash
 task apply VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/logstash
 ```
@@ -330,12 +327,10 @@ Expected: a bucket name and a `sg-` ID. Module details: [batch Terraform README]
 
 Creates the Kinesis stream, Lambda transform, Firehose delivery stream, and the Firehose security group. The apply succeeds before OpenSearch access is granted, but Firehose cannot write to the domain until Phase 5.
 
-**Setup**
-
 ```bash
 VENUE="dev"                                       # dev | test | prod
 REGION="us-west-2"
-PROFILE_NAME="<platform-engineer-sso-profile>"
+PROFILE_NAME="<aws-profile-name>"
 CDS_INFRA_DEPLOY_DIR="<path-to-cds-infra-deploy-checkout>"
 
 eval $(aws configure export-credentials --profile "${PROFILE_NAME}" --format env)
@@ -347,6 +342,7 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 **Steps**
 
 ```bash
+VENUE="dev"
 task plan  VENUE="${VENUE}" COMPONENT=o11y-cloudfront-streaming/streaming
 task apply VENUE="${VENUE}" COMPONENT=o11y-cloudfront-streaming/streaming
 ```
@@ -376,7 +372,7 @@ The second `opensearch` apply. It adds both consumer role ARNs to the access pol
 ```bash
 VENUE="dev"                                       # dev | test | prod
 REGION="us-west-2"
-PROFILE_NAME="<power-user-sso-profile>"
+PROFILE_NAME="<aws-profile-name>"
 CDS_INFRA_DEPLOY_DIR="<path-to-cds-infra-deploy-checkout>"
 
 eval $(aws configure export-credentials --profile "${PROFILE_NAME}" --format env)
@@ -487,25 +483,40 @@ aws s3api get-bucket-policy --bucket "pds-logs-${VENUE}" \
 
 Expected: `pds-cloudfront-realtime-log-config` is listed, and the bucket policy contains the Sids `AllowO11yBatchLogstashRead` and `AllowFirehoseWrite`. The second command needs `s3:GetBucketPolicy`. Allow several minutes for the distribution to finish deploying before expecting records.
 
-Then confirm records reach the Kinesis stream:
+**Verify - streaming smoke test**
+
+Run it from your workstation once the distribution has finished deploying (several minutes after the apply). It needs Phase 4 (the Kinesis stream) and this phase (the log config), and it sends its own test requests:
 
 ```bash
 bash "${O11Y_STREAMING_DIR}/scripts/smoke-test-realtime-stream.sh" "${VENUE}"
 ```
 
-Expected: `PASS: <n> record(s) reached the Kinesis stream`, within about 3 minutes. The script requests a few URLs under `/data` and polls the stream's `IncomingRecords` metric. On `FAIL`, the distribution may still be deploying; wait and re-run. The script does not check OpenSearch; that is [Phase 9](#phase-9---end-to-end-verify).
+Expected: `PASS: <n> record(s) reached the Kinesis stream`, within about 3 minutes. The script requests a few URLs under `/data` and polls the stream's `IncomingRecords` metric. On `FAIL`, the distribution may still be deploying; wait and re-run. This test stops at Kinesis. It does not check that Firehose delivered to OpenSearch (the domain is VPC-only), so that check is [Phase 9](#phase-9---end-to-end-verify).
 
 ### Phase 7 - Deploy Logstash and verify
 
-**Tier:** shell access to the EC2 as `pdsops`, through the bastion. Needs Phases 3, 5, and 6.
+**Tier:** shell access to the EC2 as `pdsops`, through the bastion. Needs Phases 3 and 5. It also needs Phase 6 if Logstash ingests CloudFront logs (`S3_CF_BUCKET_NAME` set).
 
-Installs and starts Logstash on the instance created in Phase 3. This runs on the instance, not through Terragrunt, so it has no Setup block here: each batch procedure below sets the variables it uses (`S3_CF_BUCKET_NAME`, `REPO_BRANCH`, and the optional ones). Follow the batch repo; do not copy its steps here:
+Installs and starts Logstash on the instance created in Phase 3. This runs on the instance, not through Terragrunt, so it has no Setup block here: each batch procedure below sets the variables it uses (`S3_CF_BUCKET_NAME`, `REPO_BRANCH`, and the optional ones). The batch repo owns these steps; do not copy them here.
 
-1. [Access model](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#access-model) to reach the instance.
-2. [First-boot setup](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#first-boot-setup) to deploy.
-3. [Verify the deployment](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#verify-the-deployment).
+**Steps** (on the instance, as `pdsops`)
 
-Expected: `scripts/smoke-test.sh` on the instance reports every check passing. Phases 5 and 6 are already applied, so an OpenSearch or S3 access failure here is a real fault; see the batch [Operations Runbook](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/docs/operations.md#troubleshooting).
+1. Reach the instance: [Access model](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#access-model).
+2. Deploy Logstash: [First-boot setup](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#first-boot-setup). Its last step confirms the service is `active`.
+
+**Verify - Logstash smoke test**
+
+Run it on the instance after the deploy in step 2. Phase 5 must already be applied, because the test sends a signed request to OpenSearch:
+
+```bash
+bash /opt/o11y-cloudfront-batch/scripts/smoke-test.sh
+```
+
+Expected: exit code 0 and `PASS` on every check (Logstash install, linger, deployed pipeline configs, access to the batch log bucket, OpenSearch reachability and SigV4 auth, service state). OpenSearch status `green` is expected; `yellow` is acceptable on a single-node dev cluster.
+
+A `FAIL` here is a real fault. An OpenSearch timeout or 403 means the Phase 5 access policy or ingress rule is not in effect. A failure on the bucket check points at the Phase 3 `s3` bucket or the Phase 2a IAM policy. This smoke test does not read the CloudFront logs bucket, so it does not exercise Phase 6; the CloudFront input is checked by the data-flow step in [Verify the deployment](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#verify-the-deployment) and by [Phase 9](#phase-9---end-to-end-verify). Troubleshooting: the batch [Operations Runbook](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/docs/operations.md#troubleshooting).
+
+The full check list, including the bootstrap and data-flow checks, is [Verify the deployment](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#verify-the-deployment).
 
 ### Phase 8 - OpenSearch UI Application
 
@@ -634,12 +645,22 @@ Re-run only the affected phase. Each component README owns the procedure for its
 
 ## Testing
 
+### Smoke tests
+
+Run each smoke test in its phase of the initial deployment, and again after any change to the part of the stack it covers.
+
+| Smoke test | Command | Run from | Run it | It checks |
+|---|---|---|---|---|
+| OpenSearch domain | `scripts/smoke-test.sh <venue>` in this repo | Your workstation | [Phase 1](#phase-1---bootstrap-opensearch), after the apply. Again after any `opensearch` apply that changes the domain. | The three SSM parameters, the security group, domain status, cluster health |
+| Streaming | `scripts/smoke-test-realtime-stream.sh <venue>` in o11y-cloudfront-streaming | Your workstation | [Phase 6](#phase-6---cloudfront-pds-main), after the distribution finishes deploying. Again after changing the log config, the Kinesis stream, or Firehose. | CloudFront records reach the Kinesis stream. It does not check OpenSearch. |
+| Logstash | `scripts/smoke-test.sh` in o11y-cloudfront-batch, installed at `/opt/o11y-cloudfront-batch/scripts/smoke-test.sh` | The Logstash EC2, as `pdsops` | [Phase 7](#phase-7---deploy-logstash-and-verify), after the Logstash deploy and after Phase 5. Again after each Logstash deploy. | Logstash install and service, pipeline configs, access to the batch log bucket, OpenSearch reachability and auth |
+
+### Other checks
+
 | What | Test | When |
 |---|---|---|
-| OpenSearch domain | `scripts/smoke-test.sh` ([Phase 1](#phase-1---bootstrap-opensearch)) | After every `opensearch` apply that changes the domain |
 | Cross-repo wiring | Verify steps in Phases 5 and 6 | After changing a flag, role, or security group |
 | Logstash pipeline logic | batch [`tests/README.md`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md#running-the-integration-tests-with-docker) | Before deploying any pipeline change |
-| Logstash on the instance | [Verify the deployment](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#verify-the-deployment) | After each Logstash deploy |
 | Data flow, both pipelines | [Phase 9](#phase-9---end-to-end-verify) | After an initial deployment or any change to the path |
 
 ## Teardown
