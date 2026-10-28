@@ -152,7 +152,11 @@ Run the phases in order. In each phase, run **Setup**, then **Steps**, then **Ve
 
 ### Phase 1 - Bootstrap OpenSearch
 
-**Tier:** Power User. **Time:** 15-20 min. **Creates:** the VPC-only domain; publishes its endpoint, ARN, and security group ID to SSM. **Inputs:** [opensearch README](opensearch/README.md#deploy).
+* **Tier:** Power User.
+* **Needs:** none.
+* **Time:** 15-20 min.
+* **Creates:** the VPC-only domain; publishes its endpoint, ARN, and security group ID to SSM.
+* **Inputs:** [opensearch README](opensearch/README.md#deploy).
 
 **Setup**
 
@@ -200,7 +204,11 @@ Expect: `All 7 check(s) passed.`
 
 ### Phase 2 - IAM
 
-**Tier:** Admin. **Needs:** Phase 1. **Creates:** the consumer IAM roles; publishes their ARNs to SSM. 2a and 2b can run in either order. **Inputs:** [batch `iam`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md), [streaming `iam/`](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/iam/README.md).
+* **Tier:** Admin.
+* **Needs:** Phase 1.
+* **Order:** 2a and 2b can run in either order.
+* **Creates:** the consumer IAM roles; publishes their ARNs to SSM.
+* **Inputs:** [batch `iam`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md), [streaming `iam/`](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/iam/README.md).
 
 **Setup** (2a and 2b)
 
@@ -283,7 +291,10 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 ### Phase 3 - Batch S3 and Logstash EC2
 
-**Tier:** 3a Power User, 3b Platform Engineer. **Needs:** Phases 1 and 2a. **Creates:** the log bucket (3a) and the Logstash EC2 and its security group (3b). Logstash is installed in Phase 7. **Inputs:** [batch Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md).
+* **Tier:** 3a Power User, 3b Platform Engineer.
+* **Needs:** Phases 1 and 2a.
+* **Creates:** the log bucket (3a) and the Logstash EC2 and its security group (3b). Logstash is installed in Phase 7.
+* **Inputs:** [batch Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md).
 
 **Setup**
 
@@ -335,7 +346,10 @@ Expect: a bucket name, then a `sg-` ID.
 
 ### Phase 4 - Streaming
 
-**Tier:** Platform Engineer. **Needs:** Phases 1 and 2b. **Creates:** the Kinesis stream, Lambda transform, Firehose delivery stream, and Firehose security group. **Inputs:** [streaming Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md).
+* **Tier:** Platform Engineer.
+* **Needs:** Phases 1 and 2b.
+* **Creates:** the Kinesis stream, Lambda transform, Firehose delivery stream, and Firehose security group.
+* **Inputs:** [streaming Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md).
 
 **Setup**
 
@@ -380,7 +394,10 @@ Expect: a `sg-` ID, then `ACTIVE`.
 
 ### Phase 5 - Grant Consumers OpenSearch access
 
-**Tier:** Power User. **Needs:** Phases 2a, 2b, 3, and 4. **Time:** seconds. **Does:** the second `opensearch` apply. Adds both consumer roles to the access policy and both security groups to the ingress rules.
+* **Tier:** Power User.
+* **Needs:** Phases 2a, 2b, 3, and 4.
+* **Time:** seconds.
+* **Updates:** the access policy (both consumer roles) and the ingress rules (both security groups). This is the second `opensearch` apply.
 
 **Setup**
 
@@ -453,7 +470,10 @@ Expect:
 
 ### Phase 6 - CloudFront (`pds-main`)
 
-**Tier:** Platform Engineer. **Needs:** Phases 2a, 2b, 4, and 5. **Creates:** the CloudFront real-time log config (to Kinesis) and the `AllowO11yBatchLogstashRead` and `AllowFirehoseWrite` statements on the `pds-logs-<venue>` bucket policy. **Inputs:** [pds-main o11y integration](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/cloudfront/pds-main/README.md#o11y-integration).
+* **Tier:** Platform Engineer.
+* **Needs:** Phases 2a, 2b, 4, and 5.
+* **Creates:** the CloudFront real-time log config (to Kinesis) and the `AllowO11yBatchLogstashRead` and `AllowFirehoseWrite` statements on the `pds-logs-<venue>` bucket policy.
+* **Inputs:** [pds-main o11y integration](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/cloudfront/pds-main/README.md#o11y-integration).
 
 **Setup**
 
@@ -526,7 +546,10 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 ### Phase 7 - Deploy Logstash and verify
 
-**Tier:** `pdsops` on the EC2, through the bastion. **Needs:** Phases 3 and 5 (and 6 if `S3_CF_BUCKET_NAME` is set). **Does:** installs and starts Logstash on the Phase 3 instance. The steps are in the batch repo and set their own variables.
+* **Tier:** `pdsops` on the EC2, through the bastion.
+* **Needs:** Phases 3 and 5 (and 6 if `S3_CF_BUCKET_NAME` is set).
+* **Does:** installs and starts Logstash on the Phase 3 instance.
+* **Inputs:** none here. The batch steps below set their own variables.
 
 **Steps**
 
@@ -552,7 +575,10 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 ### Phase 8 - OpenSearch UI Application
 
-**Tier:** Power User. **Needs:** Phase 1. **Creates:** the AWS-hosted OpenSearch UI Application with IAM auth. All steps are manual (CLI and console).
+* **Tier:** Power User.
+* **Needs:** Phase 1.
+* **Creates:** the AWS-hosted OpenSearch UI Application with IAM auth.
+* **Mode:** manual (CLI and console).
 
 **Setup**
 
@@ -615,7 +641,9 @@ Expect: `"status"` is `green` or `yellow`.
 
 ### Phase 9 - End-to-end verify
 
-**Tier:** the ops role from Phase 8. **Needs:** Phases 6, 7, and 8. Uses the OpenSearch UI only, so there is no Setup.
+* **Tier:** the ops role from Phase 8.
+* **Needs:** Phases 6, 7, and 8.
+* **Setup:** none. This phase uses the OpenSearch UI only.
 
 **Steps**
 
