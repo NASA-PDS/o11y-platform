@@ -1,8 +1,8 @@
 # PDS o11y-platform - Deployment Runbook
 
-This is the single runbook for deploying, updating, and testing the PDS observability stack: the shared OpenSearch domain in this repo plus its two consumers, [o11y-cloudfront-batch](https://github.com/NASA-PDS/o11y-cloudfront-batch) and [o11y-cloudfront-streaming](https://github.com/NASA-PDS/o11y-cloudfront-streaming), and the CloudFront wiring in [pdc-cds-infra](https://github.com/NASA-PDS/pdc-cds-infra).
+Runbook for deploying, updating, testing, and tearing down the PDS observability stack: the OpenSearch domain and UI application in this repo, the consumers [o11y-cloudfront-batch](https://github.com/NASA-PDS/o11y-cloudfront-batch) and [o11y-cloudfront-streaming](https://github.com/NASA-PDS/o11y-cloudfront-streaming), and the CloudFront wiring in [pdc-cds-infra](https://github.com/NASA-PDS/pdc-cds-infra).
 
-Each component repo documents its own modules (inputs, apply, verify, update). This runbook owns the **order** of phases, the **permissions** each needs, and the **cross-repo SSM contract**. It links to the component docs instead of repeating them.
+This runbook owns the **order** of phases, the **permissions** each needs, and the **cross-repo SSM contract**. Each component repo documents its own modules and is linked from the phase that deploys it.
 
 | I want to... | Go to |
 |---|---|
@@ -27,7 +27,8 @@ flowchart LR
         FHSGID["streaming firehose-security-group-id"]
     end
 
-    POL["IAM access policy\n(absent until a consumer is enabled)"]
+    OPS["ops_role_arns\n(venue input)"]
+    POL["IAM access policy\n(absent until a principal exists)"]
     SSM_OUT["SSM outputs\nopensearch_endpoint\nopensearch_arn\nopensearch_security_group_id"]
 
     subgraph wa["o11y-cloudfront-batch"]
@@ -39,23 +40,30 @@ flowchart LR
         FH["Kinesis Firehose"]
     end
 
+    subgraph ui["opensearch-ui"]
+        APP["OpenSearch UI Application"]
+    end
+
     LSSGID -->|"Logstash SG ingress rule"| SG
     FHSGID -->|"Firehose SG ingress rule"| SG
     SG --> OS
     EC2ARN -->|"IAM principal"| POL
     FHARN -->|"IAM principal"| POL
+    OPS -->|"IAM principal"| POL
     POL --> OS
     OS --> SSM_OUT
     SSM_OUT -.->|"endpoint"| LS
     SSM_OUT -.->|"arn"| WAIAM
+    SSM_OUT -.->|"arn"| APP
+    APP -->|"data source"| OS
     LS -->|"HTTPS"| SG
     FH -->|"HTTPS"| SG
 ```
 
-- **Network:** the domain is VPC-only. Security group ingress rules (port 443) for Logstash and Firehose live in this module. Each consumer's security group ID is read from SSM at plan time.
-- **API:** an IAM resource-based policy allows the consumer role ARNs, read from SSM at plan time.
-- **Gating:** both are controlled by `o11y_cloudfront_batch_enabled` and `o11y_cloudfront_streaming_enabled`, so the domain can bootstrap before any consumer exists.
-- **Discovery:** consumers read the domain's SSM outputs at plan time. There is no shared Terraform state between repos.
+- **Network:** VPC-only. The port 443 ingress rules from the Logstash and Firehose security groups live in this module; each security group ID is read from SSM at plan time.
+- **API:** an IAM resource-based policy allows the consumer role ARNs (read from SSM at plan time) and `ops_role_arns`.
+- **Gating:** `o11y_cloudfront_batch_enabled` and `o11y_cloudfront_streaming_enabled` gate each consumer's SSM reads, ingress rule, and policy entry, so the domain can bootstrap before any consumer exists.
+- **Discovery:** consumers read the domain's SSM outputs at plan time, with no shared Terraform state between repos.
 - **Ops access:** the AWS-hosted [OpenSearch UI Application](#phase-8---opensearch-ui-application), not the built-in `/_dashboards` endpoint.
 
 ## Prerequisites
@@ -64,7 +72,7 @@ Tools: [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.10.
 
 Checkouts: `cds-infra-deploy` (all venue inputs live there as `venues/<venue>/<repo>/<module>/terragrunt.hcl`), this repo (for `scripts/smoke-test.sh`), and `o11y-cloudfront-streaming` (for its Kinesis smoke test in Phase 6).
 
-Gather these values before Phase 1. Every phase opens with a **Setup** block that assigns the ones it uses, so you can run any phase in a new shell. Edit the values in each Setup block before you run it.
+Each phase opens with a **Setup** block that assigns the variables it uses, so you can run any phase in a new shell. Edit the values before you run it.
 
 | Variable | Meaning | Value |
 |---|---|---|
@@ -74,7 +82,7 @@ Gather these values before Phase 1. Every phase opens with a **Setup** block tha
 | `CDS_INFRA_DEPLOY_DIR` | Local `cds-infra-deploy` checkout | The path to your clone |
 | `O11Y_PLATFORM_DIR` | Local `o11y-platform` checkout | The path to your clone |
 
-Terraform's S3 backend needs exported credentials with `AWS_PROFILE` unset. Each Setup block does this with `aws configure export-credentials`. Credentials expire after about an hour; re-run the Setup block if a command reports expired credentials.
+Terraform's S3 backend needs exported credentials with `AWS_PROFILE` unset; each Setup block does this. Credentials expire after about an hour; re-run Setup when a command reports them expired.
 
 ## Required AWS permissions
 
@@ -90,12 +98,12 @@ A principal needs the highest tier of every module it deploys.
 
 ## SSM contract
 
-Parameters that cross a repo boundary. Each repo publishes what the next phase reads, and consumers read them at plan time. Parameters used inside a single component are documented in that component's README.
+Parameters that cross a repo boundary, read at plan time. Parameters used inside one component are documented in that component's README.
 
 | Parameter path | Published by (phase) | Read by | Read when |
 |---|---|---|---|
 | `/pds/o11y-platform/opensearch/opensearch_endpoint` | platform `opensearch` (1) | batch `logstash` | always |
-| `/pds/o11y-platform/opensearch/opensearch_arn` | platform `opensearch` (1) | batch `iam` | always |
+| `/pds/o11y-platform/opensearch/opensearch_arn` | platform `opensearch` (1) | batch `iam`; platform `opensearch-ui` | always |
 | `/pds/o11y-platform/opensearch/opensearch_security_group_id` | platform `opensearch` (1), when `vpc_enabled` | `scripts/smoke-test.sh` | - |
 | `/pds/o11y-cloudfront-batch/iam/roles/ec2/instance-role-arn` | batch `iam` (2a) | platform `opensearch`; `pds-main` | `o11y_cloudfront_batch_enabled`; `enable_o11y_batch` |
 | `/pds/o11y-cloudfront-batch/ec2/logstash_security_group_id` | batch `logstash` (3) | platform `opensearch` | `o11y_cloudfront_batch_enabled` and `vpc_enabled` |
@@ -139,12 +147,15 @@ flowchart TD
     P3 --> P5
     P4 --> P5
     P5 --> P6
-    P6 --> P7
-    P7 --> P8
+    P5 --> P7
+    P6 -.->|"only if S3_CF_BUCKET_NAME is set"| P7
+    P1 --> P8
+    P6 --> P9
+    P7 --> P9
     P8 --> P9
 ```
 
-Phase 6 runs last, after every component it points at exists. See [Phase 6](#phase-6---cloudfront-pds-main) for why.
+Phase 8 needs only Phase 1; the order above is the order to run them. Phase 6 runs after the stream exists and OpenSearch accepts both consumers; see its Notes.
 
 ## Initial deployment
 
@@ -289,15 +300,15 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 **Notes**
 
-- Phase 6 takes over the bucket ARN parameter; no import is needed.
-- The Kinesis ARN is computed. The stream exists after Phase 4. Do not deploy `streaming/` yet.
+- Phase 6 takes over the bucket ARN parameter (`overwrite = true`); no import is needed.
+- The Kinesis ARN is computed; the stream is created in Phase 4.
 
 ### Phase 3 - Batch S3 and Logstash EC2
 
 * **Tier:** 3a Power User, 3b Platform Engineer.
 * **Needs:** Phases 1 and 2a.
 * **Time:** about 10 min. The instance then bootstraps Logstash in the background for 5-10 min.
-* **Creates:** the log bucket (3a) and the Logstash EC2 and its security group (3b). Logstash is installed in Phase 7.
+* **Creates:** the log bucket (3a) and the Logstash EC2 and its security group (3b). Userdata installs Logstash at first boot; Phase 7 deploys the pipeline config and starts it.
 * **Inputs:** [batch Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md).
 
 **Setup**
@@ -545,7 +556,8 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 **Notes**
 
-- Runs last so the stream exists, OpenSearch accepts both consumers, and a rollback is setting both flags to `false`.
+- Runs after Phases 4 and 5 so the stream exists and OpenSearch accepts both consumers before CloudFront starts sending logs.
+- To roll back, follow [Disabling o11y](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/cloudfront/pds-main/README.md#disabling-o11y). Setting the flag to `false` and applying once can fail with `RealtimeLogConfigInUse`.
 - `enable_o11y_batch` is needed only if `S3_CF_BUCKET_NAME` is set.
 - The bucket policy check needs `s3:GetBucketPolicy`.
 - The streaming smoke test stops at Kinesis. OpenSearch delivery is checked in [Phase 9](#phase-9---end-to-end-verify).
@@ -555,7 +567,7 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 * **Tier:** `pdsops` on the EC2, through the bastion.
 * **Needs:** Phases 3 and 5 (and 6 if `S3_CF_BUCKET_NAME` is set).
 * **Time:** about 10 min, after the Phase 3 bootstrap finishes.
-* **Does:** installs and starts Logstash on the Phase 3 instance.
+* **Does:** deploys the pipeline config and starts Logstash on the Phase 3 instance (Logstash was installed by userdata at first boot).
 * **Inputs:** none here. The batch steps below set their own variables.
 
 **Steps**
@@ -583,10 +595,10 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 ### Phase 8 - OpenSearch UI Application
 
 * **Tier:** Power User.
-* **Needs:** Phase 1.
+* **Needs:** Phase 1. To query data in Verify, your role must also be in `ops_role_arns` (see [Updating](#updating)).
 * **Time:** about 5 min.
 * **Creates:** the AWS-hosted OpenSearch UI Application with IAM auth, the domain as its data source, and its application admin roles.
-* **Inputs:** [`opensearch-ui` module](opensearch-ui/variables.tf): `application_name` and `admin_role_arns`.
+* **Inputs:** [`opensearch-ui` README](opensearch-ui/README.md): `application_name` and `admin_role_arns`.
 
 **Setup**
 
@@ -610,18 +622,16 @@ Expect: the domain name.
 
 **Steps**
 
-1. Set the application admin roles. In `venues/<venue>/o11y-platform/opensearch-ui/terragrunt.hcl` in `cds-infra-deploy`, set `admin_role_arns`.
+1. Set `admin_role_arns` in `venues/<venue>/o11y-platform/opensearch-ui/terragrunt.hcl` in `cds-infra-deploy`.
 
-   Application admins can edit and delete the application and create, edit, and delete workspaces. Admin does not grant data access, which `ops_role_arns` controls. Admin is granted per IAM role, so everyone who assumes the role is an admin. Use the role the platform team deploys and operates with, and keep the set small.
+   Admins can edit and delete the application and manage workspaces. Admin does not grant data access, which `ops_role_arns` controls. Admin is per IAM role, so everyone who assumes the role is an admin: use the role the platform team operates with and keep the set small.
 
-   Use the role's IAM ARN:
+   Use the role's IAM ARN exactly as returned. For SSO roles it includes the `aws-reserved/sso.amazonaws.com/` path. The `assumed-role` ARN from `aws sts get-caller-identity` does not match.
 
    ```bash
    ROLE_NAME="<platform-engineer-role-name>"
    aws iam get-role --role-name "${ROLE_NAME}" --query Role.Arn --output text
    ```
-
-   Use the value as returned. For SSO roles it includes the `aws-reserved/sso.amazonaws.com/` path. The `assumed-role` ARN from `aws sts get-caller-identity` does not match.
 
 2. Authorize VPC access (once per domain). This has no Terraform resource:
 
@@ -646,23 +656,16 @@ Expect: the domain name.
 
    Expect: the apply ends with the `application_id`, `application_arn`, and `application_endpoint` outputs.
 
-4. Create a workspace. Workspaces are created in the application, as an application admin. Get the application URL:
+4. Create a workspace in the application, signed in to AWS as an admin role from step 1:
 
    ```bash
    cd "${CDS_INFRA_DEPLOY_DIR}/venues/${VENUE}/o11y-platform/opensearch-ui"
    terragrunt output -raw application_endpoint
    ```
 
-   1. Open the URL in a browser signed in to AWS as an admin role from step 1.
-   2. On the homepage, under **My workspaces**, choose the create option for a use case.
-   3. On **Create a workspace**, fill in:
-      - **Workspace name:** a unique name of up to 40 characters, using letters, digits, spaces, and `( ) [ ] _ -`. Optionally choose a **Color** for the workspace icon.
-      - **Workspace description:** optional, up to 200 characters.
-      - **Use case:** choose the set of features the workspace offers: **Observability** (logs, metrics, and traces), **Security Analytics**, **Search**, **Essentials**, or **Analytics (all features)** if you are not sure. The use case can later be changed only to one with more features.
-      - **Associate data sources:** select the data source named after the domain (`DOMAIN_NAME` from Setup).
-      - **Workspace privacy:** **Private to collaborators** (only added collaborators), **Anyone can view** (the default), or **Anyone can edit**.
-   4. Choose **Create workspace**.
-   5. To share the workspace, open it, choose the **Collaborators** tab, and add IAM roles or users with **Read only**, **Read and write**, or **Admin** access. You are the workspace admin automatically. To add collaborators during creation, select **Add collaborators after workspace creation**.
+   1. Open the URL. Under **My workspaces**, choose the create option for a use case.
+   2. Set a unique name (up to 40 characters), the **Observability** use case, and **Associate data sources**: the data source named after the domain (`DOMAIN_NAME` from Setup). Choose a **Workspace privacy** level, then **Create workspace**.
+   3. To share it, open the workspace, choose **Collaborators**, and add IAM roles or users as **Read only**, **Read and write**, or **Admin**.
 
 **Verify**
 
@@ -694,8 +697,8 @@ Expect: the domain name.
 
 **Notes**
 
-- Workspaces and their collaborators are not managed by Terraform. They live in the application, so a replaced or destroyed application loses them; recreate them from step 4. Check that a plan does not replace the application before applying it.
-- Manage admins only through `admin_role_arns`. The console's **Application admins** field shows only the `users` key, which takes IAM user ARNs, and saving the application's **Edit** page can overwrite the admin config.
+- Workspaces and collaborators are not managed by Terraform. A replaced or destroyed application loses them; recreate them from step 4. Check that a plan does not replace the application before applying it.
+- Manage admins only through `admin_role_arns`. The console's **Application admins** field shows only the `users` key (IAM user ARNs), and saving the application's **Edit** page can overwrite the admin config.
 - An application created in the console must be imported once before the first apply. From the component directory:
 
   ```bash
@@ -736,39 +739,32 @@ Expect: the domain name.
 
 ## Updating
 
-Re-run only the affected phase. Each component README owns the procedure for its own change; this table only says where to look.
+Re-run only the affected phase. Each component README owns the procedure for its own change.
 
-| Change | Procedure | Notes |
-|---|---|---|
-| OpenSearch engine version, node count, instance type | [opensearch README: Upgrade](opensearch/README.md#upgrade) | Engine upgrade is a blue/green update, about 30 minutes in `Processing` |
-| Consumer role or security group recreated | Re-run [Phase 5](#phase-5---grant-consumers-opensearch-access) | The SSM value changes, so the access policy and ingress rule must follow |
-| Operator roles with domain access | Edit `ops_role_arns` in the venue's `opensearch/terragrunt.hcl`, then re-run [Phase 5](#phase-5---grant-consumers-opensearch-access) | Access-policy update only |
-| UI application admin roles | Edit `admin_role_arns` in the venue's `opensearch-ui/terragrunt.hcl`, then re-run [Phase 8](#phase-8---opensearch-ui-application) step 3 | Admin changes can take a few minutes to apply. Check that the plan does not replace the application, which would delete its workspaces |
-| Batch IAM, S3, or Logstash instance | [batch Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md) (each module has an Update note) | A `logstash_version` change replaces the instance |
-| Logstash pipeline config or `regexes.yaml` | batch [Update pipeline configuration](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/docs/operations.md#update-pipeline-configuration) | No Terraform change. Test first with the [pipeline tests](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md#running-the-integration-tests-with-docker) |
-| Streaming Lambda, Kinesis, Firehose, or IAM | [streaming Terraform README: Updating](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#updating) | |
-| CloudFront log wiring or bucket access | pdc-cds-infra [`pds-main` README](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/cloudfront/pds-main/README.md#o11y-integration) | |
-| EC2, S3, or IAM module version | [pdc-tf-modules](https://github.com/NASA-PDS/pdc-tf-modules) | Update the module reference in the consuming component, then re-run its phase |
+| Change | Procedure |
+|---|---|
+| OpenSearch engine version, node count, instance type | [opensearch README: Upgrade](opensearch/README.md#upgrade) |
+| Consumer role or security group recreated | Re-run [Phase 5](#phase-5---grant-consumers-opensearch-access): the SSM value changes, so the access policy and ingress rule must follow |
+| Operator roles with domain access | Edit `ops_role_arns` in the venue's `opensearch/terragrunt.hcl`, then re-run [Phase 5](#phase-5---grant-consumers-opensearch-access) |
+| UI application admin roles | Edit `admin_role_arns` in the venue's `opensearch-ui/terragrunt.hcl`, then re-run [Phase 8](#phase-8---opensearch-ui-application) step 3. Changes can take a few minutes to apply. If the plan replaces the application, its workspaces are deleted. |
+| Batch IAM, S3, or Logstash instance | [batch Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md) |
+| Logstash pipeline config or `regexes.yaml` | [Update pipeline configuration](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/docs/operations.md#update-pipeline-configuration). Test first with the [pipeline tests](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md#running-the-integration-tests-with-docker). |
+| Streaming Lambda, Kinesis, Firehose, or IAM | [streaming Terraform README: Updating](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#updating) |
+| CloudFront log wiring or bucket access | [`pds-main` README: o11y integration](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/cloudfront/pds-main/README.md#o11y-integration) |
+| EC2, S3, or IAM module version | [pdc-tf-modules](https://github.com/NASA-PDS/pdc-tf-modules): update the module reference in the consuming component, then re-run its phase |
 
 ## Testing
 
-### Smoke tests
+Run each test in its phase of the initial deployment, and again after any change to the part of the stack it covers. The procedure and expected result live in the repo that owns the script.
 
-Run each smoke test in its phase of the initial deployment, and again after any change to the part of the stack it covers. This runbook says when to run each; the procedure and expected result are documented in the repo that owns the script.
-
-| Smoke test | Run it | Procedure |
+| Test | Run it | Procedure |
 |---|---|---|
-| OpenSearch domain (`smoke-test.sh`) | [Phase 1](#phase-1---bootstrap-opensearch), after the apply. Again after any `opensearch` apply that changes the domain. | [Phase 1 Verify](#phase-1---bootstrap-opensearch) (this repo) |
-| Streaming (`smoke-test-realtime-stream.sh`) | [Phase 6](#phase-6---cloudfront-pds-main), after the distribution finishes deploying. Again after changing the log config, the Kinesis stream, or Firehose. | [o11y-cloudfront-streaming: Verify](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#verify) |
-| Logstash (`smoke-test.sh`, on the EC2) | [Phase 7](#phase-7---deploy-logstash-and-verify), after the Logstash deploy and Phase 5. Again after each Logstash deploy. | [o11y-cloudfront-batch: Smoke test](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#3-smoke-test) |
-
-### Other checks
-
-| What | Test | When |
-|---|---|---|
-| Cross-repo wiring | Verify steps in Phases 5 and 6 | After changing a flag, role, or security group |
-| Logstash pipeline logic | batch [`tests/README.md`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md#running-the-integration-tests-with-docker) | Before deploying any pipeline change |
-| Data flow, both pipelines | [Phase 9](#phase-9---end-to-end-verify) | After an initial deployment or any change to the path |
+| OpenSearch domain (`scripts/smoke-test.sh`) | [Phase 1](#phase-1---bootstrap-opensearch), and after any `opensearch` apply that changes the domain | [Phase 1 Verify](#phase-1---bootstrap-opensearch) |
+| Streaming (`smoke-test-realtime-stream.sh`) | [Phase 6](#phase-6---cloudfront-pds-main), after the distribution is `Deployed`, and after changing the log config, Kinesis stream, or Firehose | [o11y-cloudfront-streaming: Verify](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#verify) |
+| Logstash (`smoke-test.sh`, on the EC2) | [Phase 7](#phase-7---deploy-logstash-and-verify), and after each Logstash deploy | [o11y-cloudfront-batch: Smoke test](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#3-smoke-test) |
+| Cross-repo wiring | Verify steps in Phases 5 and 6, after changing a flag, role, or security group | This runbook |
+| Logstash pipeline logic | Before deploying any pipeline change | [batch `tests/README.md`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md#running-the-integration-tests-with-docker) |
+| Data flow, both pipelines | After an initial deployment or any change to the path | [Phase 9](#phase-9---end-to-end-verify) |
 
 ## Teardown
 
@@ -790,14 +786,13 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 **Steps**
 
-1. Turn off the CloudFront integration (Platform Engineer). Set `enable_o11y_batch` and `enable_o11y_streaming` to `false` in `venues/<venue>/pdc-cds-infra/cloudfront/pds-main/terragrunt.hcl`, then:
+1. Turn off the CloudFront integration (Platform Engineer). Follow [Disabling o11y](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/cloudfront/pds-main/README.md#disabling-o11y) for both flags. Disabling streaming takes extra steps because CloudFront rejects deleting a log config that a distribution still references.
+
+   Export the credentials first:
 
    ```bash
    eval $(aws configure export-credentials --profile "${PROFILE_PLATFORM_ENGINEER}" --format env)
    unset AWS_PROFILE
-
-   task plan  VENUE="${VENUE}" COMPONENT=pdc-cds-infra/cloudfront/pds-main
-   task apply VENUE="${VENUE}" COMPONENT=pdc-cds-infra/cloudfront/pds-main
    ```
 
 2. Revoke the consumers' OpenSearch access (Power User). Set both flags to `false` in `venues/<venue>/o11y-platform/opensearch/terragrunt.hcl`:
@@ -869,11 +864,11 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 **Notes**
 
 - Roles must outlive the resources that use them, so IAM is destroyed after the resources.
-- Step 2 comes first because `opensearch` reads the consumer role ARNs and security group IDs from SSM while a flag is `true`, and the OpenSearch security group has ingress rules that reference the consumer security groups. Destroying a consumer first leaves those lookups failing and blocks deletion of the referenced security group.
-- Per-component notes are in each repo's README.
+- Step 2 precedes the consumer destroys because `opensearch` reads the consumer role ARNs and security group IDs from SSM while a flag is `true`, and its security group has ingress rules that reference the consumer security groups. Destroying a consumer first breaks those lookups and blocks deletion of the referenced security group.
+- Streaming and Logstash destroy details: [streaming Destroy](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#destroy), [batch Teardown](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md#teardown).
 
 ## Architecture notes
 
-- **State:** S3 backend, key `o11y-platform/opensearch.tfstate`. Bucket, region, and lock come from Terragrunt in `cds-infra-deploy`.
-- **Venue inputs** (VPC, subnets, flags) are Terragrunt inputs in `cds-infra-deploy`. The `opensearch/tfvars/*.tfvars.example` files are a reference for plain Terraform, not the operational path.
-- **Adding a consumer:** the consumer publishes its role ARN (and security group ID, if it needs VPC access) to SSM. This module gets a `<consumer>_enabled` variable (default `false`), a `data "aws_ssm_parameter"` block gated on it, an entry in `local.opensearch_access_principals`, and a gated `aws_vpc_security_group_ingress_rule`. Add the new parameters to the [SSM contract](#ssm-contract) and a phase to this runbook.
+- **State:** S3 backend, keys `o11y-platform/opensearch.tfstate` and `o11y-platform/opensearch-ui.tfstate`. Bucket, region, and lock come from Terragrunt in `cds-infra-deploy`.
+- **Venue inputs** (VPC, subnets, flags, role ARNs) are Terragrunt inputs in `cds-infra-deploy`. The `opensearch/tfvars/*.tfvars.example` files are a reference for plain Terraform, not the operational path.
+- **Adding a consumer:** the consumer publishes its role ARN (and security group ID, if it needs VPC access) to SSM. This module gets a `<consumer>_enabled` variable (default `false`), a `data "aws_ssm_parameter"` block gated on it, an entry in `local.opensearch_access_principals`, and a gated `aws_vpc_security_group_ingress_rule`. Add the parameters to the [SSM contract](#ssm-contract) and a phase to this runbook.
