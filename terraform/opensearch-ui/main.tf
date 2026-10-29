@@ -30,4 +30,11 @@ resource "aws_opensearch_application" "this" {
   tags = {
     Name = var.application_name
   }
+
+  # Workspaces, collaborators, and imported dashboards live in the application, not in
+  # Terraform state, so a destroy or replacement deletes them. To remove the application on
+  # purpose, see terraform/README.md (Teardown step 6).
+  lifecycle {
+    prevent_destroy = true
+  }
 }

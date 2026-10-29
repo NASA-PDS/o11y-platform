@@ -2,7 +2,7 @@
 
 Creates the AWS-hosted OpenSearch UI application for ops access to the shared OpenSearch domain, with the domain as its data source and IAM roles as application admins. The domain ARN is read from SSM (`/pds/o11y-platform/opensearch/opensearch_arn`), so the `opensearch` module must be applied first.
 
-Deployment, the one-time VPC authorization, and creating workspaces are in [Phase 8](../README.md#phase-8---opensearch-ui-application). Workspaces are created in the application and are not managed by Terraform.
+Deployment, the one-time VPC authorization, and creating workspaces are in [Phase 8](../README.md#phase-8---opensearch-ui-application). Workspaces are created in the application and are not managed by Terraform, so the application has `prevent_destroy`: a plan that would destroy or replace it fails. An application that already exists in a venue must be imported before the first apply.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

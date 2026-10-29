@@ -653,17 +653,38 @@ Expect: the domain name.
 
    Expect: the list includes `application.opensearchservice.amazonaws.com`.
 
-3. Create the application:
+3. Check whether the venue already has the application. Terraform does not adopt an existing application, so one that exists must be imported before the first apply:
+
+   ```bash
+   APP_NAME="<application_name from the venue's opensearch-ui/terragrunt.hcl>"
+   aws opensearch list-applications --region "${REGION}" \
+     --query "applicationSummaries[?name=='${APP_NAME}'].id" --output text
+   ```
+
+   Expect: no output for a new venue; go to step 4. For an existing application, import it:
+
+   ```bash
+   APP_ID="<application-id-from-above>"
+   cd "${CDS_INFRA_DEPLOY_DIR}/venues/${VENUE}/o11y-platform/opensearch-ui"
+   terragrunt import aws_opensearch_application.this "${APP_ID}"
+   ```
+
+4. Plan, inspect, and apply:
 
    ```bash
    cd "${CDS_INFRA_DEPLOY_DIR}"
-   task plan  VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch-ui
+   task plan VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch-ui
+   ```
+
+   Expect: a new venue adds one resource, the application. An imported application is not replaced; review any in-place change before applying. A plan that would destroy or replace the application fails on `prevent_destroy`.
+
+   ```bash
    task apply VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch-ui
    ```
 
    Expect: the apply ends with the `application_id`, `application_arn`, and `application_endpoint` outputs.
 
-4. Create a workspace in the application, signed in to AWS as an admin role from step 1:
+5. Create a workspace in the application, signed in to AWS as an admin role from step 1:
 
    ```bash
    cd "${CDS_INFRA_DEPLOY_DIR}/venues/${VENUE}/o11y-platform/opensearch-ui"
@@ -674,7 +695,7 @@ Expect: the domain name.
    2. Set a unique name (up to 40 characters), the **Observability** use case, and **Associate data sources**: the data source named after the domain (`DOMAIN_NAME` from Setup). Choose a **Workspace privacy** level, then **Create workspace**.
    3. To share it, open the workspace, choose **Collaborators**, and add IAM roles or users as **Read only**, **Read and write**, or **Admin**.
 
-5. Upload the web analytics dashboards to the workspace. Download [`export.ndjson`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/config/opensearch-ui/export.ndjson) from o11y-cloudfront-batch, then in the workspace:
+6. Upload the web analytics dashboards to the workspace. Download [`export.ndjson`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/config/opensearch-ui/export.ndjson) from o11y-cloudfront-batch, then in the workspace:
 
    1. Open **Dashboards management** > **Saved objects** and choose **Import**.
    2. Select the file and, when prompted, the data source named after the domain (`DOMAIN_NAME` from Setup). The file holds an index pattern (`pds-weblogs*`), visualizations, and dashboards, and no data source of its own.
@@ -692,11 +713,11 @@ Expect: the domain name.
 
 2. On the application homepage, check **My workspaces**.
 
-   Expect: the workspace from step 4 is listed under its use case.
+   Expect: the workspace from step 5 is listed under its use case.
 
 3. In the workspace, open **Dashboards**.
 
-   Expect: the dashboards from step 5 are listed, including `Web Analytics Dashboard`. Their panels are empty until Logstash has indexed data ([Phase 9](#phase-9---end-to-end-verify)).
+   Expect: the dashboards from step 6 are listed, including `Web Analytics Dashboard`. Their panels are empty until Logstash has indexed data ([Phase 9](#phase-9---end-to-end-verify)).
 
 **If it fails**
 
@@ -714,14 +735,8 @@ Expect: the domain name.
 
 **Notes**
 
-- Workspaces, collaborators, and imported dashboards are not managed by Terraform. A replaced or destroyed application loses them; recreate them from steps 4 and 5. Check that a plan does not replace the application before applying it.
+- Workspaces, collaborators, and imported dashboards are not managed by Terraform, and a destroyed or replaced application loses them. The application has `prevent_destroy`, so an ordinary plan or apply cannot do either. To remove it on purpose, use [Teardown](#teardown) step 6. Recreate lost workspaces from steps 5 and 6.
 - Manage admins only through `admin_role_arns`. The console's **Application admins** field shows only the `users` key (IAM user ARNs), and saving the application's **Edit** page can overwrite the admin config.
-- An application created in the console must be imported once before the first apply. From the component directory:
-
-  ```bash
-  APP_ID="<existing-application-id>"
-  terragrunt import aws_opensearch_application.this "${APP_ID}"
-  ```
 - The VPC authorization in step 2 has no Terraform resource yet ([hashicorp/terraform-provider-aws#41879](https://github.com/hashicorp/terraform-provider-aws/issues/41879)).
 
 ### Phase 9 - End-to-end verify
@@ -763,7 +778,7 @@ Re-run only the affected phase. Each component README owns the procedure for its
 | OpenSearch engine version, node count, instance type | [opensearch README: Upgrade](opensearch/README.md#upgrade) |
 | Consumer role or security group recreated | Re-run [Phase 5](#phase-5---grant-consumers-opensearch-access): the SSM value changes, so the access policy and ingress rule must follow |
 | Operator roles with domain access | Edit `ops_role_arns` in the venue's `opensearch/terragrunt.hcl`, then re-run [Phase 5](#phase-5---grant-consumers-opensearch-access) |
-| UI application admin roles | Edit `admin_role_arns` in the venue's `opensearch-ui/terragrunt.hcl`, then re-run [Phase 8](#phase-8---opensearch-ui-application) step 3. Changes can take a few minutes to apply. If the plan replaces the application, its workspaces are deleted. |
+| UI application admin roles | Edit `admin_role_arns` in the venue's `opensearch-ui/terragrunt.hcl`, then re-run [Phase 8](#phase-8---opensearch-ui-application) step 4. Changes can take a few minutes to apply. A plan that would replace the application fails on `prevent_destroy`. |
 | Batch IAM, S3, or Logstash instance | [batch Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md) |
 | Logstash pipeline config or `regexes.yaml` | [Update pipeline configuration](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/docs/operations.md#update-pipeline-configuration). Test first with the [pipeline tests](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md#running-the-integration-tests-with-docker). |
 | Streaming Lambda, Kinesis, Firehose, or IAM | [streaming Terraform README: Updating](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#updating) |
@@ -860,14 +875,26 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
    task destroy VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/iam
    ```
 
-6. Destroy the UI application (Power User). This deletes its workspaces:
+6. Remove the UI application (Power User). This deletes its workspaces. The application has `prevent_destroy`, so `task destroy` fails; drop it from state and delete it directly:
 
    ```bash
    eval $(aws configure export-credentials --profile "${PROFILE_POWER_USER}" --format env)
    unset AWS_PROFILE
 
-   task destroy VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch-ui
+   cd "${CDS_INFRA_DEPLOY_DIR}/venues/${VENUE}/o11y-platform/opensearch-ui"
+   APP_ID=$(terragrunt output -raw application_id)
+   terragrunt state rm aws_opensearch_application.this
+   aws opensearch delete-application --region "${REGION}" --id "${APP_ID}"
+   cd "${CDS_INFRA_DEPLOY_DIR}"
    ```
+
+   Check that it is gone before step 7:
+
+   ```bash
+   aws opensearch get-application --region "${REGION}" --id "${APP_ID}" --query status --output text
+   ```
+
+   Expect: `ResourceNotFoundException`, or `DELETING` (wait and re-run).
 
 7. Destroy the domain (Power User):
 
