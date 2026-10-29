@@ -604,8 +604,8 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 * **Tier:** Power User.
 * **Needs:** Phase 1. To query data in Verify, your role must also be in `ops_role_arns` (see [Updating](#updating)).
 * **Time:** about 5 min.
-* **Creates:** the AWS-hosted OpenSearch UI Application with IAM auth, the domain as its data source, and its application admin roles.
-* **Inputs:** [`opensearch-ui` README](opensearch-ui/README.md): `application_name` and `admin_role_arns`.
+* **Creates:** the AWS-hosted OpenSearch UI Application with IAM auth, the domain as its data source, its application admin roles, and (by import) the web analytics dashboards.
+* **Inputs:** [`opensearch-ui` README](opensearch-ui/README.md): `application_name` and `admin_role_arns`. Dashboards: [`export.ndjson`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/config/opensearch-ui/export.ndjson) in o11y-cloudfront-batch.
 
 **Setup**
 
@@ -674,6 +674,12 @@ Expect: the domain name.
    2. Set a unique name (up to 40 characters), the **Observability** use case, and **Associate data sources**: the data source named after the domain (`DOMAIN_NAME` from Setup). Choose a **Workspace privacy** level, then **Create workspace**.
    3. To share it, open the workspace, choose **Collaborators**, and add IAM roles or users as **Read only**, **Read and write**, or **Admin**.
 
+5. Upload the web analytics dashboards to the workspace. Download [`export.ndjson`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/config/opensearch-ui/export.ndjson) from o11y-cloudfront-batch, then in the workspace:
+
+   1. Open **Dashboards management** > **Saved objects** and choose **Import**.
+   2. Select the file and, when prompted, the data source named after the domain (`DOMAIN_NAME` from Setup). The file holds an index pattern (`pds-weblogs*`), visualizations, and dashboards, and no data source of its own.
+   3. Confirm the import.
+
 **Verify**
 
 1. Open the application in a new browser session, launch **Dev Tools**, and run:
@@ -687,6 +693,10 @@ Expect: the domain name.
 2. On the application homepage, check **My workspaces**.
 
    Expect: the workspace from step 4 is listed under its use case.
+
+3. In the workspace, open **Dashboards**.
+
+   Expect: the dashboards from step 5 are listed, including `Web Analytics Dashboard`. Their panels are empty until Logstash has indexed data ([Phase 9](#phase-9---end-to-end-verify)).
 
 **If it fails**
 
@@ -704,7 +714,7 @@ Expect: the domain name.
 
 **Notes**
 
-- Workspaces and collaborators are not managed by Terraform. A replaced or destroyed application loses them; recreate them from step 4. Check that a plan does not replace the application before applying it.
+- Workspaces, collaborators, and imported dashboards are not managed by Terraform. A replaced or destroyed application loses them; recreate them from steps 4 and 5. Check that a plan does not replace the application before applying it.
 - Manage admins only through `admin_role_arns`. The console's **Application admins** field shows only the `users` key (IAM user ARNs), and saving the application's **Edit** page can overwrite the admin config.
 - An application created in the console must be imported once before the first apply. From the component directory:
 
