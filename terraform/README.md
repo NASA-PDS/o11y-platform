@@ -130,7 +130,7 @@ flowchart TD
     P5["5. opensearch re-apply, flags true\n(Power User, seconds)"]
     P6["6. pdc-cds-infra pds-main\n(Platform Eng)"]
     P7["7. Logstash on-instance deploy + verify\n(pdsops via bastion)"]
-    P8["8. OpenSearch UI Application\n(Power User, manual)"]
+    P8["8. OpenSearch UI Application\n(Power User)"]
     P9["9. End-to-end verify"]
 
     P1 --> P2a & P2b
@@ -584,14 +584,16 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 * **Tier:** Power User.
 * **Needs:** Phase 1.
-* **Time:** about 10 min.
-* **Creates:** the AWS-hosted OpenSearch UI Application with IAM auth.
-* **Mode:** manual (CLI and console).
+* **Time:** about 5 min.
+* **Creates:** the AWS-hosted OpenSearch UI Application with IAM auth, the domain as its data source, and its application admin roles.
+* **Inputs:** [`opensearch-ui` module](opensearch-ui/variables.tf): `application_name` and `admin_role_arns`.
 
 **Setup**
 
 ```bash
+VENUE="dev"                                       # dev | test | prod
 REGION="us-west-2"
+CDS_INFRA_DEPLOY_DIR="<path-to-cds-infra-deploy-checkout>"
 PROFILE_NAME="<power-user-sso-profile>"
 
 eval $(aws configure export-credentials --profile "${PROFILE_NAME}" --format env)
@@ -608,7 +610,20 @@ Expect: the domain name.
 
 **Steps**
 
-1. Authorize VPC access (once per domain):
+1. Set the application admin roles. In `venues/<venue>/o11y-platform/opensearch-ui/terragrunt.hcl` in `cds-infra-deploy`, set `admin_role_arns`.
+
+   Application admins can edit and delete the application and create, edit, and delete workspaces. Admin does not grant data access, which `ops_role_arns` controls. Admin is granted per IAM role, so everyone who assumes the role is an admin. Use the role the platform team deploys and operates with, and keep the set small.
+
+   Use the role's IAM ARN:
+
+   ```bash
+   ROLE_NAME="<platform-engineer-role-name>"
+   aws iam get-role --role-name "${ROLE_NAME}" --query Role.Arn --output text
+   ```
+
+   Use the value as returned. For SSO roles it includes the `aws-reserved/sso.amazonaws.com/` path. The `assumed-role` ARN from `aws sts get-caller-identity` does not match.
+
+2. Authorize VPC access (once per domain). This has no Terraform resource:
 
    ```bash
    aws opensearch authorize-vpc-endpoint-access --region "${REGION}" \
@@ -621,31 +636,73 @@ Expect: the domain name.
 
    Expect: the list includes `application.opensearchservice.amazonaws.com`.
 
-2. Create the application. In the console, open **Amazon OpenSearch Service > OpenSearch UI (Dashboards) > Create application**, then:
-   - **Application name:** `pds-<venue>-o11y-ui`.
-   - **Authentication with IAM Identity Center:** leave unchecked.
-   - **OpenSearch application admins:** choose **Grant administrator's permission to specific user(s)**, select **IAM users**, and add the ops IAM role ARN(s).
-   - Choose **Create**.
+3. Create the application:
 
-3. Associate the domain. On the application page, choose **Manage data sources**, select the domain from Setup, then **Next > Save**.
+   ```bash
+   cd "${CDS_INFRA_DEPLOY_DIR}"
+   task plan  VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch-ui
+   task apply VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch-ui
+   ```
+
+   Expect: the apply ends with the `application_id`, `application_arn`, and `application_endpoint` outputs.
+
+4. Create a workspace. Workspaces are created in the application, as an application admin. Get the application URL:
+
+   ```bash
+   cd "${CDS_INFRA_DEPLOY_DIR}/venues/${VENUE}/o11y-platform/opensearch-ui"
+   terragrunt output -raw application_endpoint
+   ```
+
+   1. Open the URL in a browser signed in to AWS as an admin role from step 1.
+   2. On the homepage, under **My workspaces**, choose the create option for a use case.
+   3. On **Create a workspace**, fill in:
+      - **Workspace name:** a unique name of up to 40 characters, using letters, digits, spaces, and `( ) [ ] _ -`. Optionally choose a **Color** for the workspace icon.
+      - **Workspace description:** optional, up to 200 characters.
+      - **Use case:** choose the set of features the workspace offers: **Observability** (logs, metrics, and traces), **Security Analytics**, **Search**, **Essentials**, or **Analytics (all features)** if you are not sure. The use case can later be changed only to one with more features.
+      - **Associate data sources:** select the data source named after the domain (`DOMAIN_NAME` from Setup).
+      - **Workspace privacy:** **Private to collaborators** (only added collaborators), **Anyone can view** (the default), or **Anyone can edit**.
+   4. Choose **Create workspace**.
+   5. To share the workspace, open it, choose the **Collaborators** tab, and add IAM roles or users with **Read only**, **Read and write**, or **Admin** access. You are the workspace admin automatically. To add collaborators during creation, select **Add collaborators after workspace creation**.
 
 **Verify**
 
-Launch the application, open **Dev Tools**, and run:
+1. Open the application in a new browser session, launch **Dev Tools**, and run:
 
-```text
-GET _cluster/health
-```
+   ```text
+   GET _cluster/health
+   ```
 
-Expect: `"status"` is `green` or `yellow`.
+   Expect: `"status"` is `green` or `yellow`.
+
+2. On the application homepage, check **My workspaces**.
+
+   Expect: the workspace from step 4 is listed under its use case.
 
 **If it fails**
 
 - 403 in Dev Tools: your role is not in `ops_role_arns` in the venue's `opensearch/terragrunt.hcl`.
+- No create option under **My workspaces**: the role is not in the application admin config, or the change has not taken effect yet. Check the stored config:
+
+  ```bash
+  cd "${CDS_INFRA_DEPLOY_DIR}/venues/${VENUE}/o11y-platform/opensearch-ui"
+  APP_ID=$(terragrunt output -raw application_id)
+
+  aws opensearch get-application --region "${REGION}" --id "${APP_ID}" --query appConfigs
+  ```
+
+  The ARN under `opensearchDashboards.dashboardAdmin.groups` must be the role's IAM ARN from step 1. Admin changes can take a few minutes to reach the application, so wait and sign in again in a new browser session before changing the config again.
 
 **Notes**
 
-- No Terraform resource exists yet for the UI Application ([hashicorp/terraform-provider-aws#45082](https://github.com/hashicorp/terraform-provider-aws/issues/45082)) or the VPC authorization ([#41879](https://github.com/hashicorp/terraform-provider-aws/issues/41879)).
+- Workspaces and their collaborators are not managed by Terraform. They live in the application, so a replaced or destroyed application loses them; recreate them from step 4. Check that a plan does not replace the application before applying it.
+- Manage admins only through `admin_role_arns`. The console's **Application admins** field shows only the `users` key, which takes IAM user ARNs, and saving the application's **Edit** page can overwrite the admin config.
+- An application created in the console must be imported once before the first apply. From the component directory:
+
+  ```bash
+  APP_ID="<existing-application-id>"
+  terragrunt import aws_opensearch_application.this "${APP_ID}"
+  ```
+- The VPC authorization in step 2 has no Terraform resource yet ([hashicorp/terraform-provider-aws#41879](https://github.com/hashicorp/terraform-provider-aws/issues/41879)).
 
 ### Phase 9 - End-to-end verify
 
@@ -686,6 +743,7 @@ Re-run only the affected phase. Each component README owns the procedure for its
 | OpenSearch engine version, node count, instance type | [opensearch README: Upgrade](opensearch/README.md#upgrade) | Engine upgrade is a blue/green update, about 30 minutes in `Processing` |
 | Consumer role or security group recreated | Re-run [Phase 5](#phase-5---grant-consumers-opensearch-access) | The SSM value changes, so the access policy and ingress rule must follow |
 | Operator roles with domain access | Edit `ops_role_arns` in the venue's `opensearch/terragrunt.hcl`, then re-run [Phase 5](#phase-5---grant-consumers-opensearch-access) | Access-policy update only |
+| UI application admin roles | Edit `admin_role_arns` in the venue's `opensearch-ui/terragrunt.hcl`, then re-run [Phase 8](#phase-8---opensearch-ui-application) step 3 | Admin changes can take a few minutes to apply. Check that the plan does not replace the application, which would delete its workspaces |
 | Batch IAM, S3, or Logstash instance | [batch Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md) (each module has an Update note) | A `logstash_version` change replaces the instance |
 | Logstash pipeline config or `regexes.yaml` | batch [Update pipeline configuration](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/docs/operations.md#update-pipeline-configuration) | No Terraform change. Test first with the [pipeline tests](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md#running-the-integration-tests-with-docker) |
 | Streaming Lambda, Kinesis, Firehose, or IAM | [streaming Terraform README: Updating](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#updating) | |
@@ -714,7 +772,7 @@ Run each smoke test in its phase of the initial deployment, and again after any 
 
 ## Teardown
 
-Irreversible: this deletes all indexed data. Destroy in reverse phase order, using the tier that created each resource.
+Irreversible: this deletes all indexed data and the UI workspaces. Destroy in reverse phase order, using the tier that created each resource.
 
 **Setup**
 
@@ -790,7 +848,16 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
    task destroy VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/iam
    ```
 
-6. Destroy the domain (Power User):
+6. Destroy the UI application (Power User). This deletes its workspaces:
+
+   ```bash
+   eval $(aws configure export-credentials --profile "${PROFILE_POWER_USER}" --format env)
+   unset AWS_PROFILE
+
+   task destroy VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch-ui
+   ```
+
+7. Destroy the domain (Power User):
 
    ```bash
    eval $(aws configure export-credentials --profile "${PROFILE_POWER_USER}" --format env)

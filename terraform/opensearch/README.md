@@ -148,7 +148,7 @@ task opensearch:deploy VENUE=dev
 
 ### Post-deploy and verification
 
-- **Console access for the VPC domain** (one-time authorization of `application.opensearchservice.amazonaws.com`): [Phase 8, Step 1](../README.md#phase-8---opensearch-ui-application).
+- **Console access for the VPC domain** (one-time authorization of `application.opensearchservice.amazonaws.com`): [Phase 8, Step 2](../README.md#phase-8---opensearch-ui-application).
 - **Smoke test** (`scripts/smoke-test.sh` at the repo root): [Phase 1 Verify](../README.md#phase-1---bootstrap-opensearch).
 
 ## Upgrade

@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Current components:**
 - **Managed OpenSearch domain** (`terraform/opensearch/`) — VPC-only OpenSearch cluster. Both the o11y-cloudfront-batch Logstash pipeline and the o11y-cloudfront-streaming Firehose stream write to this domain. Consumers discover the endpoint via SSM.
+- **OpenSearch UI Application** (`terraform/opensearch-ui/`) — the AWS-hosted UI for ops access, with the domain as its data source and IAM role ARNs as application admins. Reads the domain ARN from SSM.
 
 **Sub-component repos that consume this platform:**
 - [o11y-cloudfront-batch](https://github.com/NASA-PDS/o11y-cloudfront-batch) — Logstash EC2 ingesting node access logs
@@ -15,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Shared infrastructure dependency — pdc-cds-infra:**
 
-This repo depends on [pdc-cds-infra](https://github.com/NASA-PDS/pdc-cds-infra) (checked out at `/Users/jpadams/proj/pds/pdsen/workspace/pdc-cds-infra` locally). It is the shared infra layer for the PDS CDS ecosystem, deployed in the same AWS account and region. It owns the VPC and the CloudFront distribution (`terraform/cloudfront/pds-main/`) that later phases enable for o11y. **Do not create Cognito or Dashboards resources here** — ops access is the AWS-hosted OpenSearch UI Application (manual; see `terraform/README.md#phase-8---opensearch-ui-application`). Fine-grained access control stays off.
+This repo depends on [pdc-cds-infra](https://github.com/NASA-PDS/pdc-cds-infra) (checked out at `/Users/jpadams/proj/pds/pdsen/workspace/pdc-cds-infra` locally). It is the shared infra layer for the PDS CDS ecosystem, deployed in the same AWS account and region. It owns the VPC and the CloudFront distribution (`terraform/cloudfront/pds-main/`) that later phases enable for o11y. **Do not create Cognito or built-in Dashboards resources here** — ops access is the AWS-hosted OpenSearch UI Application (`terraform/opensearch-ui/`; see `terraform/README.md#phase-8---opensearch-ui-application`). Fine-grained access control stays off.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -28,7 +29,7 @@ This repo depends on [pdc-cds-infra](https://github.com/NASA-PDS/pdc-cds-infra) 
 │                          o11y-platform (this repo)                          │
 │  OpenSearch domain (VPC-only)                                               │
 │  Ingress: EC2 (always) + Firehose (if o11y_cloudfront_streaming_enabled)    │
-│  Ops UI: OpenSearch UI Application (manual, not Terraform)                  │
+│  Ops UI: OpenSearch UI Application (opensearch-ui module)                   │
 │  SSM outputs: endpoint, ARN, security group ID                              │
 │                (paths: terraform/README.md#ssm-contract)                    │
 └────────────┬──────────────────────────────┬────────────────────────────────┘
@@ -72,6 +73,13 @@ terraform/
   │       ├── dev.tfvars.example   # Reference inputs for standalone Terraform only (not the operational path)
   │       ├── test.tfvars.example
   │       └── prod.tfvars.example
+  ├── opensearch-ui/               # OpenSearch UI application (admins, domain data source)
+  │   ├── main.tf                  # aws_opensearch_application; reads the domain ARN from SSM
+  │   ├── outputs.tf               # Application ID, ARN, endpoint
+  │   ├── variables.tf             # application_name, admin_role_arns
+  │   ├── versions.tf
+  │   ├── provider.tf
+  │   └── backend.tf               # S3 backend key (pinned; bucket/region from Terragrunt)
   ├── Taskfile.yaml                # Standalone Terraform runner for opensearch:* commands (not the operational path)
   └── .taskrc.yaml                 # interactive: true (enables VENUE enum prompting)
 ```
@@ -128,7 +136,7 @@ CI (`.github/workflows/terraform_cicd.yaml`) currently only runs `terraform fmt`
 - **`lifecycle { ignore_changes = [tags] }`** on the OpenSearch SG — suppresses drift from AWS Config auto-tagging.
 - **State** — S3 backend, key `o11y-platform/opensearch.tfstate`. Bucket/region/lock come from Terragrunt in `cds-infra-deploy`, not from `backend-*.hcl` files in this repo.
 - **dev vs prod sizing** — dev uses single-node, no dedicated masters, no zone awareness (`t3.medium.search`); prod-like venues should enable `dedicated_master_enabled` and `zone_awareness_enabled` with matching subnet/AZ counts.
-- **Ops access via OpenSearch UI Application** — not Cognito and not the built-in `/_dashboards` endpoint. There is no `dashboards_enabled` flag and no `cognito_options` on the domain; `advanced_security_options.enabled` stays `false`. After the domain exists, authorize `application.opensearchservice.amazonaws.com` and create the UI Application in the console. See `terraform/README.md#phase-8---opensearch-ui-application`.
+- **Ops access via OpenSearch UI Application** — not Cognito and not the built-in `/_dashboards` endpoint. There is no `dashboards_enabled` flag and no `cognito_options` on the domain; `advanced_security_options.enabled` stays `false`. After the domain exists, authorize `application.opensearchservice.amazonaws.com` (a one-time CLI step; the provider has no resource for it) and apply `opensearch-ui`, which creates the UI Application. Application admins are IAM role ARNs in `admin_role_arns`, written to the `opensearchDashboards.dashboardAdmin.groups` key, using the role's IAM ARN as returned by `aws iam get-role` (for SSO roles that includes the `aws-reserved/sso.amazonaws.com/` path; assumed-role/STS ARNs do not match). Admin does not grant data access; `ops_role_arns` does. See `terraform/README.md#phase-8---opensearch-ui-application`.
 
 ### Adding a new consumer
 
