@@ -1,6 +1,6 @@
 # OpenSearch Module
 
-Creates the shared OpenSearch domain for PDS observability and publishes its endpoint, ARN, and (when vpc_enabled = true) security group ID to SSM for downstream consumers (o11y-cloudfront-batch, o11y-cloudfront-streaming).
+Creates the shared VPC-only OpenSearch domain for PDS observability and publishes its endpoint, ARN, and security group ID to SSM for the consumers (o11y-cloudfront-batch, o11y-cloudfront-streaming) and the [`opensearch-ui`](../opensearch-ui/README.md) module. Deployment order and the SSM contract are in the [runbook](../README.md).
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -83,9 +83,9 @@ No modules.
 
 ### Operational deployments (Terragrunt via cds-infra-deploy)
 
-Every venue (dev, test, prod) is deployed this way. All inputs live in
-`venues/<venue>/o11y-platform/opensearch/terragrunt.hcl` in `cds-infra-deploy`; there are no
-tfvars files in the operational path. The inputs block looks like this (placeholder values only):
+Every venue (dev, test, prod) is deployed this way. Inputs live in
+`venues/<venue>/o11y-platform/opensearch/terragrunt.hcl` in `cds-infra-deploy`. Example inputs block
+(placeholder values only):
 
 ```hcl
 inputs = {
@@ -114,42 +114,37 @@ inputs = {
   o11y_cloudfront_batch_enabled     = false
   o11y_cloudfront_streaming_enabled = false
 
-  # Operator IAM role ARNs granted es:ESHttp* on the domain (see ../README.md#phase-8---opensearch-ui-application).
+  # Operator IAM role ARNs granted es:ESHttp* on the domain (data access in the OpenSearch UI).
   ops_role_arns = []
 
   engine_version = "OpenSearch_2.19"
 }
 ```
 
-Deploy it from the runbook. The bootstrap apply is [Phase 1](../README.md#phase-1---bootstrap-opensearch) and the consumer re-apply is [Phase 5](../README.md#phase-5---grant-consumers-opensearch-access). Each phase's Setup block assigns the variables, exports the credentials, and changes into the `cds-infra-deploy` checkout.
+Deploy it from the runbook: the bootstrap apply is [Phase 1](../README.md#phase-1---bootstrap-opensearch) and the consumer re-apply is [Phase 5](../README.md#phase-5---grant-consumers-opensearch-access).
 
-### Standalone Terraform (reference only, not the operational path)
+### Standalone Terraform (reference only)
 
-The `tfvars/*.tfvars.example` files are a reference for the inputs the module takes when it is
-run as plain Terraform, outside Terragrunt. They are not how dev, test, or prod are deployed
-and are not kept in step with the venue values in `cds-infra-deploy`. Use them to try the module
-in a scratch account, or as a checklist of the inputs a Terragrunt `inputs` block needs.
+The `tfvars/*.tfvars.example` files list the inputs for running the module as plain Terraform, for example in a scratch account. They are not kept in step with the venue values in `cds-infra-deploy`.
 
 ```bash
 PROFILE_NAME="<sso-profile>"
 O11Y_PLATFORM_DIR="<path-to-o11y-platform-checkout>"
 
-# The Terraform S3 backend needs exported credentials with AWS_PROFILE unset.
 eval $(aws configure export-credentials --profile "${PROFILE_NAME}" --format env)
 unset AWS_PROFILE
 
 cd "${O11Y_PLATFORM_DIR}/terraform"
-cp opensearch/tfvars/dev.tfvars.example opensearch/tfvars/dev.tfvars
-# edit dev.tfvars (gitignored): fill in domain_name, vpc_id, vpc_subnet_ids
+cp opensearch/tfvars/dev.tfvars.example opensearch/tfvars/dev.tfvars   # gitignored; fill in domain_name, vpc_id, vpc_subnet_ids
 
 task opensearch:plan   VENUE=dev
 task opensearch:deploy VENUE=dev
 ```
 
-### Post-deploy and verification
+### After deploy
 
-- **Console access for the VPC domain** (one-time authorization of `application.opensearchservice.amazonaws.com`): [Phase 8, Step 1](../README.md#phase-8---opensearch-ui-application).
-- **Smoke test** (`scripts/smoke-test.sh` at the repo root): [Phase 1 Verify](../README.md#phase-1---bootstrap-opensearch).
+- **Smoke test** (`scripts/smoke-test.sh`): [Phase 1 Verify](../README.md#phase-1---bootstrap-opensearch).
+- **OpenSearch UI access** (one-time VPC authorization of `application.opensearchservice.amazonaws.com`): [Phase 8, step 2](../README.md#phase-8---opensearch-ui-application).
 
 ## Upgrade
 
@@ -157,8 +152,8 @@ Re-apply from `cds-infra-deploy` after changing the Terragrunt inputs. Run the [
 
 ### Engine version
 
-Update `engine_version` in the Terragrunt inputs (e.g. `"OpenSearch_2.19"` → next version) and re-apply. AWS performs a blue/green upgrade — the domain stays up but enters "Processing" state for ~30 minutes. No downtime for consumers. Always pin the version explicitly; do not rely on the module default, which tracks the latest tested version.
+Update `engine_version` in the Terragrunt inputs and re-apply. AWS performs a blue/green upgrade: the domain stays up but is `Processing` for about 30 minutes, with no downtime for consumers. Always pin the version explicitly; the module default tracks the latest tested version.
 
 ### Node count or instance type
 
-Update `data_node_count`, `data_node_instance_type`, or `master_node_instance_type` and re-apply. For single-node dev clusters scaling to multi-node, also set `zone_awareness_enabled = true` and provide multiple `vpc_subnet_ids` (one per AZ) — this triggers a domain configuration update (~10 min), not a replacement.
+Update `data_node_count`, `data_node_instance_type`, or `master_node_instance_type` and re-apply. When scaling a single-node dev cluster to multi-node, also set `zone_awareness_enabled = true` and provide one `vpc_subnet_ids` entry per AZ. This is a domain configuration update (about 10 minutes), not a replacement.
