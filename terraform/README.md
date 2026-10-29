@@ -112,6 +112,7 @@ Parameters that cross a repo boundary, read at plan time. Parameters used inside
 | `/pds/o11y-cloudfront-streaming/cloudfront/cloudfront-role-arn` | streaming `iam/` (2b) | `pds-main` | `enable_o11y_streaming` |
 | `/pds/o11y-cloudfront-streaming/kinesis/kinesis-stream-arn` | streaming `iam/` (2b); the ARN is computed, the stream is created in phase 4 | `pds-main` | `enable_o11y_streaming` |
 | `/pds/pdc-cds-infra/s3/pds-logs-bucket-arn` | `pds-main` (6); seeded by hand before phase 2b on a first deploy | streaming `iam/` and `streaming/` | always |
+| `/pds/cds-infra/bastion-core/target-security-group-id` | `pdc-cds-infra` bastion-core (before 3) | batch `logstash` | `manage_ec2_instance = true` |
 
 Streaming looks up the OpenSearch domain by name, not through SSM.
 
@@ -140,9 +141,11 @@ flowchart TD
     P7["7. Logstash on-instance deploy + verify\n(pdsops via bastion)"]
     P8["8. OpenSearch UI Application\n(Power User)"]
     P9["9. End-to-end verify"]
+    PB["pdc-cds-infra bastion-core\n(before 3)"]
 
     P1 --> P2a & P2b
     P2a --> P3
+    PB --> P3
     P2b --> P4
     P3 --> P5
     P4 --> P5
@@ -306,7 +309,7 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 ### Phase 3 - Batch S3 and Logstash EC2
 
 * **Tier:** 3a Power User, 3b Platform Engineer.
-* **Needs:** Phases 1 and 2a.
+* **Needs:** Phases 1 and 2a, and the venue's [bastion-core](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/bastion-core/README.md#deployment) stack (`pdc-cds-infra/bastion-core/iam`, then `pdc-cds-infra/bastion-core`). 3b reads the bastion target security group from SSM.
 * **Time:** about 10 min. The instance then bootstraps Logstash in the background for 5-10 min.
 * **Creates:** the log bucket (3a) and the Logstash EC2 and its security group (3b). Userdata installs Logstash at first boot; Phase 7 deploys the pipeline config and starts it.
 * **Inputs:** [batch Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md).
@@ -358,6 +361,10 @@ aws ssm get-parameter --region "${REGION}" \
 ```
 
 Expect: a bucket name, then a `sg-` ID.
+
+**If it fails**
+
+- 3b plan reports a missing `/pds/cds-infra/bastion-core/target-security-group-id` parameter: apply bastion-core for the venue, then re-run.
 
 ### Phase 4 - Streaming
 
