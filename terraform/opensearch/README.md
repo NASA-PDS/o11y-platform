@@ -1,6 +1,6 @@
 # OpenSearch Module
 
-Creates the shared OpenSearch domain for PDS observability and publishes its endpoint and ARN to SSM for downstream consumers (web-analytics, CloudFront real-time logging).
+Creates the shared VPC-only OpenSearch domain for PDS observability and publishes its endpoint, ARN, and security group ID to SSM for the consumers (o11y-cloudfront-batch, o11y-cloudfront-streaming) and the [`opensearch-ui`](../opensearch-ui/README.md) module. Deployment order and the SSM contract are in the [runbook](../README.md).
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -30,10 +30,13 @@ No modules.
 | [aws_ssm_parameter.opensearch_arn](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_parameter) | resource |
 | [aws_ssm_parameter.opensearch_endpoint](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_parameter) | resource |
 | [aws_ssm_parameter.opensearch_security_group_id](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_parameter) | resource |
+| [aws_vpc_security_group_ingress_rule.opensearch_https_from_firehose](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_ingress_rule) | resource |
+| [aws_vpc_security_group_ingress_rule.opensearch_https_from_logstash](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_ingress_rule) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
-| [aws_security_group.mcp_ec2](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/security_group) | data source |
-| [aws_ssm_parameter.cloudfront_realtime_firehose_role_arn](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
 | [aws_ssm_parameter.ec2_role_arn](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
+| [aws_ssm_parameter.firehose_role_arn](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
+| [aws_ssm_parameter.firehose_security_group_id](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
+| [aws_ssm_parameter.logstash_security_group_id](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
 
 ## Inputs
 
@@ -41,51 +44,116 @@ No modules.
 | ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_domain_name"></a> [domain\_name](#input\_domain\_name) | Name of the managed OpenSearch domain | `string` | n/a | yes |
 | <a name="input_ebs_volume_gb"></a> [ebs\_volume\_gb](#input\_ebs\_volume\_gb) | EBS volume size per data node in GB | `number` | n/a | yes |
+| <a name="input_managedby"></a> [managedby](#input\_managedby) | Tag value for owner managing the resource (e.g. PDS Team email distro) | `string` | n/a | yes |
 | <a name="input_venue"></a> [venue](#input\_venue) | Tag value for venue (dev, test, prod) | `string` | n/a | yes |
 | <a name="input_vpc_enabled"></a> [vpc\_enabled](#input\_vpc\_enabled) | Deploy the domain inside a VPC. This module is intended to be VPC-only. | `bool` | n/a | yes |
 | <a name="input_availability_zone_count"></a> [availability\_zone\_count](#input\_availability\_zone\_count) | Number of AZs for zone awareness. Must match data\_node\_count and number of vpc\_subnet\_ids. Only used when zone\_awareness\_enabled = true. | `number` | `3` | no |
 | <a name="input_aws_region"></a> [aws\_region](#input\_aws\_region) | Effective AWS Region | `string` | `"us-west-2"` | no |
-| <a name="input_cicd"></a> [cicd](#input\_cicd) | Tag value for CICD deployment method | `string` | `"terraform"` | no |
-| <a name="input_component"></a> [component](#input\_component) | Tag value for component | `string` | `"observability"` | no |
+| <a name="input_cicd"></a> [cicd](#input\_cicd) | Tag value for CICD deployment method | `string` | `"iac"` | no |
+| <a name="input_component"></a> [component](#input\_component) | Tag value for component | `string` | `"o11y-platform"` | no |
 | <a name="input_data_node_count"></a> [data\_node\_count](#input\_data\_node\_count) | Number of data nodes | `number` | `3` | no |
 | <a name="input_data_node_instance_type"></a> [data\_node\_instance\_type](#input\_data\_node\_instance\_type) | Instance type for data nodes | `string` | `"r6g.xlarge.search"` | no |
 | <a name="input_dedicated_master_enabled"></a> [dedicated\_master\_enabled](#input\_dedicated\_master\_enabled) | Enable dedicated master nodes. Recommended for prod, unnecessary for dev single-node clusters. | `bool` | `true` | no |
 | <a name="input_ebs_volume_type"></a> [ebs\_volume\_type](#input\_ebs\_volume\_type) | EBS volume type | `string` | `"gp3"` | no |
-| <a name="input_ec2_security_group_name"></a> [ec2\_security\_group\_name](#input\_ec2\_security\_group\_name) | Name of the MCP EC2 security group. Used to allow 443 inbound to the OpenSearch domain. Required when vpc\_enabled = true. | `string` | `""` | no |
 | <a name="input_encryption_at_rest"></a> [encryption\_at\_rest](#input\_encryption\_at\_rest) | Enable encryption at rest | `bool` | `true` | no |
 | <a name="input_engine_version"></a> [engine\_version](#input\_engine\_version) | OpenSearch engine version (e.g. OpenSearch\_2.17). Pin to the deployed version to prevent unintended upgrades. | `string` | `"OpenSearch_2.19"` | no |
-| <a name="input_managedby"></a> [managedby](#input\_managedby) | Tag value for owner managing the resource (e.g. PDS Team email distro) | `string` | `"pdsoperator@jpl.nasa.gov"` | no |
 | <a name="input_master_node_count"></a> [master\_node\_count](#input\_master\_node\_count) | Number of dedicated master nodes | `number` | `3` | no |
 | <a name="input_master_node_instance_type"></a> [master\_node\_instance\_type](#input\_master\_node\_instance\_type) | Instance type for dedicated master nodes | `string` | `"m6g.large.search"` | no |
 | <a name="input_node_to_node_encryption"></a> [node\_to\_node\_encryption](#input\_node\_to\_node\_encryption) | Enable node-to-node encryption | `bool` | `true` | no |
+| <a name="input_o11y_cloudfront_batch_enabled"></a> [o11y\_cloudfront\_batch\_enabled](#input\_o11y\_cloudfront\_batch\_enabled) | Whether the o11y-cloudfront-batch consumer has been deployed. When true, its Logstash EC2 role ARN is read from SSM (/pds/o11y-cloudfront-batch/iam/roles/ec2/instance-role-arn) and added as an OpenSearch access-policy principal, and its Logstash SG ID is read from SSM (/pds/o11y-cloudfront-batch/ec2/logstash\_security\_group\_id) to create the Logstash→OpenSearch VPC ingress rule. Leave false for the initial bootstrap deploy (before o11y-cloudfront-batch's iam and logstash modules have published those parameters), then re-apply with true once both exist — this only updates the access policy and ingress rule, no domain redeployment. | `bool` | `false` | no |
+| <a name="input_o11y_cloudfront_streaming_enabled"></a> [o11y\_cloudfront\_streaming\_enabled](#input\_o11y\_cloudfront\_streaming\_enabled) | Whether the o11y-cloudfront-streaming consumer has been deployed. When true, its Firehose role ARN is read from SSM (/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn) and added as an OpenSearch access-policy principal, and its Firehose SG ID is read from SSM (/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id) to create the Firehose→OpenSearch VPC ingress rule. Leave false for the initial bootstrap deploy (before o11y-cloudfront-streaming has published those SSM parameters), then re-apply with true once it exists — this only updates the access policy and ingress rule, no domain redeployment. | `bool` | `false` | no |
+| <a name="input_ops_role_arns"></a> [ops\_role\_arns](#input\_ops\_role\_arns) | IAM role ARNs of operators granted es:ESHttp* on the domain, in addition to the enabled consumer roles. Used for ops access through the OpenSearch UI Application. Must be IAM role ARNs (arn:<partition>:iam::<account-id>:role/<name>), which match every session of the role; assumed-role/STS ARNs do not match. Leave empty when operators already have es:ESHttp* through their own IAM policy. | `list(string)` | `[]` | no |
 | <a name="input_partition"></a> [partition](#input\_partition) | AWS partition (aws, aws-us-gov, aws-cn) | `string` | `"aws"` | no |
-| <a name="input_realtime_monitor_enabled"></a> [realtime\_monitor\_enabled](#input\_realtime\_monitor\_enabled) | Whether the cf-realtime-monitor consumer has been deployed. When true, its Firehose role ARN is read from SSM (/pds/monitor/firehose/firehose-role-arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before cf-realtime-monitor's iam module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment. cf-realtime-monitor manages its own Firehose→OpenSearch security-group ingress rule, so no SG input is needed here. | `bool` | `false` | no |
 | <a name="input_tenant"></a> [tenant](#input\_tenant) | Tag value for tenant | `string` | `"en"` | no |
 | <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | VPC ID for the OpenSearch domain security group. Required when vpc\_enabled = true. | `string` | `""` | no |
 | <a name="input_vpc_subnet_ids"></a> [vpc\_subnet\_ids](#input\_vpc\_subnet\_ids) | Subnet IDs for the OpenSearch domain VPC endpoint. One subnet per AZ. Required when vpc\_enabled = true. | `list(string)` | `[]` | no |
-| <a name="input_web_analytics_enabled"></a> [web\_analytics\_enabled](#input\_web\_analytics\_enabled) | Whether the web-analytics consumer has been deployed. When true, its Logstash EC2 role ARN is read from SSM (/pds/web-analytics/iam/ec2\_role\_arn) and added as an OpenSearch access-policy principal. Leave false for the initial bootstrap deploy (before web-analytics' iam/policies module has published that parameter), then re-apply with true once it exists — this only updates the access policy, no domain redeployment. | `bool` | `false` | no |
 | <a name="input_zone_awareness_enabled"></a> [zone\_awareness\_enabled](#input\_zone\_awareness\_enabled) | Enable zone awareness (multi-AZ). Set true for prod (3 nodes, 3 subnets), false for dev (1 node, 1 subnet). | `bool` | `false` | no |
 
 ## Outputs
 
 | Name | Description |
 | ---- | ----------- |
-| <a name="output_opensearch_arn"></a> [opensearch\_arn](#output\_opensearch\_arn) | Managed OpenSearch domain ARN — published to /pds/observability/opensearch/opensearch\_arn |
+| <a name="output_opensearch_arn"></a> [opensearch\_arn](#output\_opensearch\_arn) | Managed OpenSearch domain ARN — published to /pds/o11y-platform/opensearch/opensearch\_arn |
 | <a name="output_opensearch_domain_name"></a> [opensearch\_domain\_name](#output\_opensearch\_domain\_name) | Managed OpenSearch domain name (Terraform output only, not published to SSM) |
-| <a name="output_opensearch_endpoint"></a> [opensearch\_endpoint](#output\_opensearch\_endpoint) | Managed OpenSearch domain endpoint URL — published to /pds/observability/opensearch/opensearch\_endpoint |
-| <a name="output_opensearch_security_group_id"></a> [opensearch\_security\_group\_id](#output\_opensearch\_security\_group\_id) | OpenSearch domain VPC security group ID — published to /pds/observability/opensearch/opensearch\_security\_group\_id when vpc\_enabled |
+| <a name="output_opensearch_endpoint"></a> [opensearch\_endpoint](#output\_opensearch\_endpoint) | Managed OpenSearch domain endpoint URL — published to /pds/o11y-platform/opensearch/opensearch\_endpoint |
+| <a name="output_opensearch_security_group_id"></a> [opensearch\_security\_group\_id](#output\_opensearch\_security\_group\_id) | OpenSearch domain VPC security group ID — published to /pds/o11y-platform/opensearch/opensearch\_security\_group\_id when vpc\_enabled |
 <!-- END_TF_DOCS -->
 
 ## Deploy
 
-```bash
-cp tfvars/dev.tfvars.example tfvars/dev.tfvars
-# edit tfvars/dev.tfvars — fill in vpc_id, subnet_ids, security group IDs
+### Operational deployments (Terragrunt via cds-infra-deploy)
 
-task opensearch:plan   VENUE=dev LOCAL=1
-task opensearch:deploy VENUE=dev LOCAL=1
+Every venue (dev, test, prod) is deployed this way. Inputs live in
+`venues/<venue>/o11y-platform/opensearch/terragrunt.hcl` in `cds-infra-deploy`. Example inputs block
+(placeholder values only):
+
+```hcl
+inputs = {
+  aws_region = "<region>"
+  tenant     = "<tenant>"
+  component  = "o11y-platform"
+  managedby  = "<team-email>"
+  venue      = "<dev|test|prod>"
+
+  domain_name   = "<domain-name>"
+  ebs_volume_gb = 100
+
+  data_node_instance_type   = "<instance-type>"
+  data_node_count           = 1
+  master_node_instance_type = "<instance-type>"
+  master_node_count         = 3
+  dedicated_master_enabled  = false
+  zone_awareness_enabled    = false
+
+  vpc_enabled    = true
+  vpc_id         = "<vpc-id>"
+  vpc_subnet_ids = ["<private-subnet-id>"]
+
+  # Bootstrap with both false; set to true on the second apply, after the consumer's
+  # modules have published their SSM parameters (see ../README.md#deployment-flow).
+  o11y_cloudfront_batch_enabled     = false
+  o11y_cloudfront_streaming_enabled = false
+
+  # Operator IAM role ARNs granted es:ESHttp* on the domain (data access in the OpenSearch UI).
+  ops_role_arns = []
+
+  engine_version = "OpenSearch_2.19"
+}
 ```
 
-Domain creation takes ~15–20 minutes. Plan output is intentionally not saved with `-out` — re-run plan immediately before apply.
+Deploy it from the runbook: the bootstrap apply is [Phase 1](../README.md#phase-1---bootstrap-opensearch) and the consumer re-apply is [Phase 5](../README.md#phase-5---grant-consumers-opensearch-access).
 
-> **Note:** This module does not use a `common-<venue>.tfvars` file. All variables are supplied via `tfvars/<venue>.tfvars` alone.
+### Standalone Terraform (reference only)
+
+The `tfvars/*.tfvars.example` files list the inputs for running the module as plain Terraform, for example in a scratch account. They are not kept in step with the venue values in `cds-infra-deploy`.
+
+```bash
+PROFILE_NAME="<sso-profile>"
+O11Y_PLATFORM_DIR="<path-to-o11y-platform-checkout>"
+
+eval $(aws configure export-credentials --profile "${PROFILE_NAME}" --format env)
+unset AWS_PROFILE
+
+cd "${O11Y_PLATFORM_DIR}/terraform"
+cp opensearch/tfvars/dev.tfvars.example opensearch/tfvars/dev.tfvars   # gitignored; fill in domain_name, vpc_id, vpc_subnet_ids
+
+task opensearch:plan   VENUE=dev
+task opensearch:deploy VENUE=dev
+```
+
+### After deploy
+
+- **Smoke test** (`scripts/smoke-test.sh`): [Phase 1 Verify](../README.md#phase-1---bootstrap-opensearch).
+- **OpenSearch UI access** (one-time VPC authorization of `application.opensearchservice.amazonaws.com`): [Phase 8, step 2](../README.md#phase-8---opensearch-ui-application).
+
+## Upgrade
+
+Re-apply from `cds-infra-deploy` after changing the Terragrunt inputs. Run the [smoke test](../README.md#phase-1---bootstrap-opensearch) afterward.
+
+### Engine version
+
+Update `engine_version` in the Terragrunt inputs and re-apply. AWS performs a blue/green upgrade: the domain stays up but is `Processing` for about 30 minutes, with no downtime for consumers. Always pin the version explicitly; the module default tracks the latest tested version.
+
+### Node count or instance type
+
+Update `data_node_count`, `data_node_instance_type`, or `master_node_instance_type` and re-apply. When scaling a single-node dev cluster to multi-node, also set `zone_awareness_enabled = true` and provide one `vpc_subnet_ids` entry per AZ. This is a domain configuration update (about 10 minutes), not a replacement.

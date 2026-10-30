@@ -1,4 +1,6 @@
-# OpenSearch module test values.
+# OpenSearch module test values — reference for standalone Terraform only.
+# Operational deployments (dev, test, prod) use Terragrunt inputs in cds-infra-deploy,
+# not tfvars; see ../README.md#deploy.
 # Note: common-dev.tfvars is NOT passed to this module — all values go here.
 
 venue     = "test"
@@ -19,12 +21,15 @@ zone_awareness_enabled    = true
 vpc_enabled              = true
 vpc_id                   = ""
 vpc_subnet_ids           = []   # Provide one subnet per AZ for zone awareness
-ec2_security_group_name  = ""   # Name of the MCP EC2 security group
 
-# Leave both false for the initial bootstrap deploy — flip to true and re-apply
-# (access-policy update only, no domain redeployment) once each consumer has
-# deployed and published its role ARN to SSM. See terraform/README.md#deployment-flow.
-web_analytics_enabled    = false
-realtime_monitor_enabled = false
+# Leave both false for the initial bootstrap deploy.
+# Flip to true once each consumer has deployed and published its role ARN to SSM
+# (access-policy update only, no domain redeployment). See terraform/README.md#deployment-flow.
+o11y_cloudfront_batch_enabled     = false
+o11y_cloudfront_streaming_enabled = false
+
+# IAM role ARNs (arn:<partition>:iam::<account-id>:role/<name>) of operators who need
+# domain access through the OpenSearch UI Application. Leave empty if none.
+ops_role_arns = []
 
 engine_version = "OpenSearch_2.19"
