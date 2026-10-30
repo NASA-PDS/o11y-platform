@@ -217,6 +217,7 @@ Expect: `All 7 check(s) passed.`
 
 - Domain is `Processing`: wait, then re-run.
 - SSM parameter missing: the apply did not complete.
+- `CreateDomain` fails with `ValidationException: Before you can proceed, you must enable a service-linked role to give Amazon OpenSearch Service permissions to access your VPC`: this happens on the first VPC domain in an account. AWS creates the OpenSearch service-linked role automatically, but it can take a couple of minutes to become available. Wait a few minutes, then re-run `task apply`.
 
 ### Phase 2 - IAM
 
