@@ -24,9 +24,25 @@ data "aws_ssm_parameter" "firehose_security_group_id" {
   name  = "/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id"
 }
 
+# Private hosted zone published by pdc-cds-infra (terraform/private-hosted-zone). Only looked up
+# when the custom endpoint is enabled, so the domain can still be created before the zone exists.
+data "aws_ssm_parameter" "private_zone_id" {
+  count = var.custom_endpoint_enabled ? 1 : 0
+  name  = "/pds/private-hosted-zone/id"
+}
+
+data "aws_ssm_parameter" "private_zone_name" {
+  count = var.custom_endpoint_enabled ? 1 : 0
+  name  = "/pds/private-hosted-zone/name"
+}
+
 locals {
   module_relative_path = replace(abspath(path.module), "/^.*\\/terraform\\//", "")
   ssm_prefix           = "/pds/o11y-platform/${local.module_relative_path}"
+
+  # Hostname clients use to reach the domain. It resolves only inside the VPC because the CNAME
+  # lives in the private hosted zone.
+  custom_endpoint_hostname = var.custom_endpoint_enabled ? "${var.custom_endpoint_label}.${data.aws_ssm_parameter.private_zone_name[0].insecure_value}" : null
 
   opensearch_access_principals = concat(
     var.o11y_cloudfront_batch_enabled ? [data.aws_ssm_parameter.ec2_role_arn[0].value] : [],
@@ -122,6 +138,10 @@ resource "aws_opensearch_domain" "this" { #NOSONAR
   domain_endpoint_options {
     enforce_https       = true
     tls_security_policy = "Policy-Min-TLS-1-2-2019-07"
+
+    custom_endpoint_enabled         = var.custom_endpoint_enabled
+    custom_endpoint                 = local.custom_endpoint_hostname
+    custom_endpoint_certificate_arn = var.custom_endpoint_enabled ? var.custom_endpoint_certificate_arn : null
   }
 
   advanced_security_options {
@@ -143,7 +163,18 @@ resource "aws_opensearch_domain" "this" { #NOSONAR
   }
 }
 
+# Custom hostname for the domain, in the private hosted zone so it resolves only inside the VPC.
+# The AWS-generated endpoint stays in public DNS and keeps working; the security group rules and the
+# domain access policy remain the access controls.
+resource "aws_route53_record" "opensearch_custom_endpoint" {
+  count = var.custom_endpoint_enabled ? 1 : 0
 
+  zone_id = data.aws_ssm_parameter.private_zone_id[0].insecure_value
+  name    = local.custom_endpoint_hostname
+  type    = "CNAME"
+  ttl     = 300
+  records = [aws_opensearch_domain.this.endpoint]
+}
 
 # Absent until at least one principal exists (an enabled consumer or an entry in ops_role_arns) —
 # an access policy with an empty Principal.AWS is invalid, and on the initial bootstrap deploy no

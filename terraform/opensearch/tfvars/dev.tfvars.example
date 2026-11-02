@@ -28,6 +28,12 @@ vpc_subnet_ids           = []
 o11y_cloudfront_batch_enabled     = false
 o11y_cloudfront_streaming_enabled = false
 
+# Private custom endpoint (resolves only inside the VPC). Needs the private hosted zone
+# parameters in SSM and an ISSUED ACM certificate for the hostname. See ../README.md.
+custom_endpoint_enabled         = false
+custom_endpoint_certificate_arn = ""
+publish_custom_endpoint_to_ssm  = false
+
 # IAM role ARNs (arn:<partition>:iam::<account-id>:role/<name>) of operators who need
 # domain access through the OpenSearch UI Application. Leave empty if none.
 ops_role_arns = []

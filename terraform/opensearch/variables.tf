@@ -113,6 +113,45 @@ variable "o11y_cloudfront_streaming_enabled" {
   default     = false
 }
 
+variable "custom_endpoint_enabled" {
+  type        = bool
+  description = "Give the domain a custom endpoint that resolves only inside the VPC. When true, the private hosted zone ID and name are read from SSM (/pds/private-hosted-zone/id and /pds/private-hosted-zone/name, published by pdc-cds-infra private-hosted-zone), the domain's custom endpoint is set to <custom_endpoint_label>.<zone name> using custom_endpoint_certificate_arn, and a CNAME to the AWS-generated endpoint is created in that zone. This is an in-place update of the domain. Enabling it before the private-hosted-zone stack has published its parameters fails the plan."
+  default     = false
+}
+
+variable "custom_endpoint_label" {
+  type        = string
+  description = "Label prepended to the private hosted zone name to form the custom endpoint hostname. Used only when custom_endpoint_enabled = true."
+  default     = "o11y-opensearch"
+
+  validation {
+    condition     = can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", var.custom_endpoint_label))
+    error_message = "custom_endpoint_label must be a single lowercase DNS label."
+  }
+}
+
+variable "custom_endpoint_certificate_arn" {
+  type        = string
+  description = "ARN of the ACM certificate for the custom endpoint hostname, in the same region as the domain, status ISSUED. The certificate must cover <custom_endpoint_label>.<private hosted zone name> and be trusted by the consumers. The principal applying this module needs acm:ListCertificates and acm:DescribeCertificate. Required when custom_endpoint_enabled = true."
+  default     = ""
+
+  validation {
+    condition     = !var.custom_endpoint_enabled || can(regex("^arn:[a-z-]+:acm:[a-z0-9-]+:[0-9]{12}:certificate/.+$", var.custom_endpoint_certificate_arn))
+    error_message = "custom_endpoint_certificate_arn must be an ACM certificate ARN when custom_endpoint_enabled = true."
+  }
+}
+
+variable "publish_custom_endpoint_to_ssm" {
+  type        = bool
+  description = "Publish the custom endpoint hostname, instead of the AWS-generated endpoint, to /pds/o11y-platform/opensearch/opensearch_endpoint so consumers pick it up. Apply with custom_endpoint_enabled = true and this false first, confirm the hostname resolves and serves TLS inside the VPC, then set this true. Setting it back to false restores the generated endpoint. Requires custom_endpoint_enabled = true."
+  default     = false
+
+  validation {
+    condition     = !var.publish_custom_endpoint_to_ssm || var.custom_endpoint_enabled
+    error_message = "publish_custom_endpoint_to_ssm requires custom_endpoint_enabled = true."
+  }
+}
+
 variable "ops_role_arns" {
   type        = list(string)
   description = "IAM role ARNs of operators granted es:ESHttp* on the domain, in addition to the enabled consumer roles. Used for ops access through the OpenSearch UI Application. Must be IAM role ARNs (arn:<partition>:iam::<account-id>:role/<name>), which match every session of the role; assumed-role/STS ARNs do not match. Leave empty when operators already have es:ESHttp* through their own IAM policy."
