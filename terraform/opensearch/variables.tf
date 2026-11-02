@@ -132,7 +132,7 @@ variable "custom_endpoint_label" {
 
 variable "custom_endpoint_certificate_arn" {
   type        = string
-  description = "ARN of the ACM certificate for the custom endpoint hostname, in the same region as the domain, status ISSUED. The certificate must cover <custom_endpoint_label>.<private hosted zone name> and be trusted by the consumers. The principal applying this module needs acm:ListCertificates and acm:DescribeCertificate. Required when custom_endpoint_enabled = true."
+  description = "ARN of the ACM certificate for the custom endpoint hostname, in the same region as the domain, status ISSUED. The certificate must cover <custom_endpoint_label>.<private hosted zone name>, either as an exact name or as a wildcard for the zone (*.<private hosted zone name>), and be trusted by the consumers. The principal applying this module needs acm:ListCertificates and acm:DescribeCertificate. Required when custom_endpoint_enabled = true."
   default     = ""
 
   validation {

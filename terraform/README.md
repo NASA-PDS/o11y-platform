@@ -815,7 +815,7 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
    Expect: one hosted zone and two SSM parameters added.
 
-2. Get an ACM certificate for the custom hostname, `<custom_endpoint_label>.<zone name>`, and wait until it is `ISSUED`. Follow [Certificate](opensearch/README.md#certificate). The zone name is:
+2. Get an ACM certificate for the venue and wait until it is `ISSUED`. Each venue is its own account, so each needs its own. Request one wildcard certificate for the private zone, `*.<zone name>`: it covers the custom hostname and any later internal service hostname. A certificate for the parent public domain does not cover the hostname. Follow [Certificate](opensearch/README.md#certificate). The zone name is:
 
    ```bash
    aws ssm get-parameter --region "${REGION}" \
@@ -892,7 +892,7 @@ Expect: the custom hostname. Then run the Logstash smoke test ([Phase 7 Verify](
 **If it fails**
 
 - Step 4 plan fails reading `/pds/private-hosted-zone/id`: step 1 is not applied in this venue.
-- Step 4 apply fails on the certificate: it is not `ISSUED`, is in another region, or does not cover the hostname. The applying role also needs `acm:ListCertificates` and `acm:DescribeCertificate`.
+- Step 4 apply fails on the certificate: it is not `ISSUED`, is in another region than the domain, is in another account, or does not cover the hostname. The applying role also needs `acm:ListCertificates` and `acm:DescribeCertificate`. If the wildcard certificate is rejected, request an exact-name certificate for the hostname instead.
 - Step 5 shows a TLS error: the certificate does not cover the hostname, or the client does not trust it.
 - To roll back, set `publish_custom_endpoint_to_ssm = false`, re-apply, and re-run the Logstash deploy. Turning `custom_endpoint_enabled` off as well removes the custom endpoint and the CNAME.
 
@@ -931,6 +931,25 @@ Run each test in its phase of the initial deployment, and again after any change
 | Private DNS (resolves inside the VPC, NXDOMAIN outside) | [Phase 10](#phase-10---private-dns) step 5, and after any change to the zone, the custom endpoint, or the certificate | [Phase 10](#phase-10---private-dns) |
 | Logstash pipeline logic | Before deploying any pipeline change | [batch `tests/README.md`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md#running-the-integration-tests-with-docker) |
 | Data flow, both pipelines | After an initial deployment or any change to the path | [Phase 9](#phase-9---end-to-end-verify) |
+
+### Testing an unmerged change
+
+To plan a component against a local checkout of its module repo, without editing the `ref=` or the venue's `module_ref`, override the Terragrunt source for the run. This applies to every venue (dev, test, prod). The full procedure is in the cds-infra-deploy README, section "Test unmerged module changes locally"; the essentials:
+
+```bash
+MODULE_DIR="<path-to-module-repo-checkout>"
+SOURCE_PATH="terraform/opensearch"     # the //<path> in the leaf's terraform.source
+export TG_SOURCE="${MODULE_DIR}//${SOURCE_PATH}"
+
+cd "${CDS_INFRA_DEPLOY_DIR}"
+task plan VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
+```
+
+- Keep the `//<path>` in the value, run one leaf at a time (never `run --all`), and `unset TG_SOURCE` afterwards.
+- After editing local files, set `TG_SOURCE_UPDATE=true` for the run or delete the leaf's `.terragrunt-cache/`.
+- Pass module variables the leaf does not set yet as environment variables instead of editing the leaf, for example `export TF_VAR_custom_endpoint_enabled=true` and `export TF_VAR_custom_endpoint_certificate_arn="${CERT_ARN}"`.
+- Plan only. Apply from a merged ref, so what is deployed matches git.
+- `TG_SOURCE` replaces only the leaf's source. A module that calls another repo by git ref inside its own `.tf` files still fetches that ref; point it at a local checkout with a temporary, git-ignored `override.tf`. The modules in this repo have none. The batch `logstash` module's `ec2` module is pinned to a `pdc-tf-modules` tag.
 
 ## Teardown
 

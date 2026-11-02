@@ -54,7 +54,7 @@ No modules.
 | <a name="input_aws_region"></a> [aws\_region](#input\_aws\_region) | Effective AWS Region | `string` | `"us-west-2"` | no |
 | <a name="input_cicd"></a> [cicd](#input\_cicd) | Tag value for CICD deployment method | `string` | `"iac"` | no |
 | <a name="input_component"></a> [component](#input\_component) | Tag value for component | `string` | `"o11y-platform"` | no |
-| <a name="input_custom_endpoint_certificate_arn"></a> [custom\_endpoint\_certificate\_arn](#input\_custom\_endpoint\_certificate\_arn) | ARN of the ACM certificate for the custom endpoint hostname, in the same region as the domain, status ISSUED. The certificate must cover <custom\_endpoint\_label>.<private hosted zone name> and be trusted by the consumers. The principal applying this module needs acm:ListCertificates and acm:DescribeCertificate. Required when custom\_endpoint\_enabled = true. | `string` | `""` | no |
+| <a name="input_custom_endpoint_certificate_arn"></a> [custom\_endpoint\_certificate\_arn](#input\_custom\_endpoint\_certificate\_arn) | ARN of the ACM certificate for the custom endpoint hostname, in the same region as the domain, status ISSUED. The certificate must cover <custom\_endpoint\_label>.<private hosted zone name>, either as an exact name or as a wildcard for the zone (*.<private hosted zone name>), and be trusted by the consumers. The principal applying this module needs acm:ListCertificates and acm:DescribeCertificate. Required when custom\_endpoint\_enabled = true. | `string` | `""` | no |
 | <a name="input_custom_endpoint_enabled"></a> [custom\_endpoint\_enabled](#input\_custom\_endpoint\_enabled) | Give the domain a custom endpoint that resolves only inside the VPC. When true, the private hosted zone ID and name are read from SSM (/pds/private-hosted-zone/id and /pds/private-hosted-zone/name, published by pdc-cds-infra private-hosted-zone), the domain's custom endpoint is set to <custom\_endpoint\_label>.<zone name> using custom\_endpoint\_certificate\_arn, and a CNAME to the AWS-generated endpoint is created in that zone. This is an in-place update of the domain. Enabling it before the private-hosted-zone stack has published its parameters fails the plan. | `bool` | `false` | no |
 | <a name="input_custom_endpoint_label"></a> [custom\_endpoint\_label](#input\_custom\_endpoint\_label) | Label prepended to the private hosted zone name to form the custom endpoint hostname. Used only when custom\_endpoint\_enabled = true. | `string` | `"o11y-opensearch"` | no |
 | <a name="input_data_node_count"></a> [data\_node\_count](#input\_data\_node\_count) | Number of data nodes | `number` | `3` | no |
@@ -159,6 +159,7 @@ task opensearch:deploy VENUE=dev
 
 - **Smoke test** (`scripts/smoke-test.sh`): [Phase 1 Verify](../README.md#phase-1---bootstrap-opensearch).
 - **OpenSearch UI access** (one-time VPC authorization of `application.opensearchservice.amazonaws.com`): [Phase 8, step 2](../README.md#phase-8---opensearch-ui-application).
+- **Testing an unmerged change** to this module through Terragrunt, without editing `ref=` or `module_ref`: [runbook](../README.md#testing-an-unmerged-change).
 
 ## Private custom endpoint
 
@@ -176,16 +177,29 @@ This is an in-place update of the domain with no replacement and no data loss; t
 
 ### Certificate
 
-The custom endpoint needs an ACM certificate in the domain's region, status `ISSUED`, that covers the hostname `<custom_endpoint_label>.<zone name>`. Consumers connect to that hostname over TLS, so they must trust the certificate; a public ACM certificate is trusted by default. The principal that applies this module needs `acm:ListCertificates` and `acm:DescribeCertificate`.
+The certificate must cover the exact custom hostname, `<custom_endpoint_label>.<zone name>`. Per the AWS documentation for [OpenSearch Service custom endpoints](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/customendpoint.html), the certificate must have the custom endpoint name, be in the same account as the domain, and have status `ISSUED`; the same page lists a wildcard certificate as an option. Consumers connect to the hostname over TLS, so they must trust the certificate; a public ACM certificate is trusted by default. The principal that applies this module needs `acm:ListCertificates` and `acm:DescribeCertificate`.
 
-ACM validates a public certificate from public DNS, so it cannot use the private zone. Create the DNS validation record in the venue's public hosted zone, under the full validation name ACM returns:
+**What covers the hostname**
+
+- A certificate for the parent public domain does not. A certificate name matches only itself, and a wildcard `*.<parent>` matches exactly one label, so it does not cover `<label>.internal.<parent>`.
+- An exact-name certificate for `<custom_endpoint_label>.<zone name>` does.
+- **Recommended:** one wildcard certificate for the private zone, `*.<zone name>`. It covers the OpenSearch hostname and any internal service hostname added to the zone later.
+
+Prefer the wildcard because public ACM certificates are written to public Certificate Transparency logs. An exact-name certificate publishes the individual internal hostname; the wildcard publishes only the zone name. Using the wildcard with an OpenSearch custom endpoint has not yet been exercised on a PDS domain: if the apply rejects the certificate, use an exact-name certificate.
+
+**Where to create it**
+
+- Create the certificate in the domain's region (`us-west-2`). The CloudFront certificate in `us-east-1` is not suitable.
+- Each venue is its own AWS account, so each venue needs its own certificate.
+- ACM validates a public certificate from public DNS, so the private zone cannot be used for validation. Create the DNS validation record in the venue's public hosted zone, under the full validation name ACM returns.
+- ACM Private CA is the alternative to a public certificate. It is a paid service, and every consumer must trust the private CA.
 
 ```bash
 REGION="us-west-2"
-CUSTOM_HOSTNAME="<custom-endpoint-hostname>"
+ZONE_NAME="<private-hosted-zone-name>"
 
 aws acm request-certificate --region "${REGION}" \
-  --domain-name "${CUSTOM_HOSTNAME}" --validation-method DNS \
+  --domain-name "*.${ZONE_NAME}" --validation-method DNS \
   --query CertificateArn --output text
 ```
 
@@ -197,7 +211,7 @@ aws acm describe-certificate --region "${REGION}" --certificate-arn "${CERT_ARN}
   --query 'Certificate.DomainValidationOptions[0].ResourceRecord' --output json
 ```
 
-Wait until the certificate is `ISSUED`, then set `custom_endpoint_certificate_arn`.
+Wait until the certificate is `ISSUED`, then set `custom_endpoint_certificate_arn`. For an exact-name certificate, request `<custom_endpoint_label>.<zone name>` as the `--domain-name` instead.
 
 ### Enable and verify
 
