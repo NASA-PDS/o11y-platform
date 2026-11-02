@@ -1,13 +1,8 @@
-locals {
-  # What consumers connect to: the custom hostname once published, otherwise the AWS-generated endpoint.
-  published_endpoint = var.publish_custom_endpoint_to_ssm ? local.custom_endpoint_hostname : aws_opensearch_domain.this.endpoint
-}
-
 resource "aws_ssm_parameter" "opensearch_endpoint" {
   name        = "${local.ssm_prefix}/opensearch_endpoint"
   type        = "String"
-  value       = local.published_endpoint
-  description = "Managed OpenSearch domain endpoint used by clients (custom hostname when published, otherwise the AWS-generated endpoint)"
+  value       = aws_opensearch_domain.this.endpoint
+  description = "Managed OpenSearch domain endpoint"
 }
 
 resource "aws_ssm_parameter" "opensearch_arn" {
@@ -26,13 +21,8 @@ resource "aws_ssm_parameter" "opensearch_security_group_id" {
 }
 
 output "opensearch_endpoint" {
-  value       = local.published_endpoint
-  description = "Managed OpenSearch domain endpoint used by clients (custom hostname when published, otherwise the AWS-generated endpoint) — published to /pds/o11y-platform/opensearch/opensearch_endpoint"
-}
-
-output "opensearch_custom_endpoint" {
-  value       = local.custom_endpoint_hostname
-  description = "Custom endpoint hostname in the private hosted zone. Null when custom_endpoint_enabled = false"
+  value       = aws_opensearch_domain.this.endpoint
+  description = "Managed OpenSearch domain endpoint URL — published to /pds/o11y-platform/opensearch/opensearch_endpoint"
 }
 
 output "opensearch_domain_name" {

@@ -113,8 +113,8 @@ Parameters that cross a repo boundary, read at plan time. Parameters used inside
 | `/pds/o11y-cloudfront-streaming/kinesis/kinesis-stream-arn` | streaming `iam/` (2b); the ARN is computed, the stream is created in phase 4 | `pds-main` | `enable_o11y_streaming` |
 | `/pds/pdc-cds-infra/s3/pds-logs-bucket-arn` | `pds-main` (6); seeded by hand before phase 2b on a first deploy | streaming `iam/` and `streaming/` | always |
 | `/pds/cds-infra/bastion-core/target-security-group-id` | `pdc-cds-infra` bastion-core (before 3) | batch `logstash` | `manage_ec2_instance = true` |
-| `/pds/private-hosted-zone/id` | `pdc-cds-infra` private-hosted-zone (before 3) | platform `opensearch`; batch `logstash` | `custom_endpoint_enabled`; `manage_ec2_instance = true` |
-| `/pds/private-hosted-zone/name` | `pdc-cds-infra` private-hosted-zone (before 3) | platform `opensearch`; batch `logstash` | `custom_endpoint_enabled`; `manage_ec2_instance = true` |
+| `/pds/private-hosted-zone/id` | `pdc-cds-infra` private-hosted-zone (before 3) | batch `logstash` | `manage_ec2_instance = true` |
+| `/pds/private-hosted-zone/name` | `pdc-cds-infra` private-hosted-zone (before 3) | batch `logstash` | `manage_ec2_instance = true` |
 
 Streaming looks up the OpenSearch domain by name, not through SSM.
 
@@ -143,15 +143,13 @@ flowchart TD
     P7["7. Logstash on-instance deploy + verify\n(pdsops via bastion)"]
     P8["8. OpenSearch UI Application\n(Power User)"]
     P9["9. End-to-end verify"]
-    P10["10. Private DNS\n(Power User)"]
     PB["pdc-cds-infra bastion-core\n(before 3)"]
-    PZ["pdc-cds-infra private-hosted-zone\n(before 3, Phase 10 step 1)"]
+    PZ["pdc-cds-infra private-hosted-zone\n(before 3)"]
 
     P1 --> P2a & P2b
     P2a --> P3
     PB --> P3
     PZ --> P3
-    PZ --> P10
     P2b --> P4
     P3 --> P5
     P4 --> P5
@@ -162,11 +160,9 @@ flowchart TD
     P6 --> P9
     P7 --> P9
     P8 --> P9
-    P1 --> P10
-    P7 --> P10
 ```
 
-Phase 8 needs only Phase 1; the order above is the order to run them. Phase 10 needs Phase 1 for the endpoint and Phase 7 for the Logstash switch. Phase 6 runs after the stream exists and OpenSearch accepts both consumers; see its Notes.
+Phase 8 needs only Phase 1; the order above is the order to run them. Phase 6 runs after the stream exists and OpenSearch accepts both consumers; see its Notes.
 
 ## Initial deployment
 
@@ -318,7 +314,7 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 ### Phase 3 - Batch S3 and Logstash EC2
 
 * **Tier:** 3a Power User, 3b Platform Engineer.
-* **Needs:** Phases 1 and 2a, the venue's [bastion-core](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/bastion-core/README.md#deployment) stack (`pdc-cds-infra/bastion-core/iam`, then `pdc-cds-infra/bastion-core`), and the venue's private hosted zone ([Phase 10](#phase-10---private-dns) step 1, `pdc-cds-infra/private-hosted-zone`). 3b reads the bastion target security group and the private zone from SSM.
+* **Needs:** Phases 1 and 2a, the venue's [bastion-core](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/bastion-core/README.md#deployment) stack (`pdc-cds-infra/bastion-core/iam`, then `pdc-cds-infra/bastion-core`), and the venue's private hosted zone (`pdc-cds-infra/private-hosted-zone`, Power User: `task apply VENUE="${VENUE}" COMPONENT=pdc-cds-infra/private-hosted-zone`; see its [README](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/private-hosted-zone/README.md)). 3b reads the bastion target security group and the private zone from SSM.
 * **Time:** about 10 min. The instance then bootstraps Logstash in the background for 5-10 min.
 * **Creates:** the log bucket (3a) and the Logstash EC2 and its security group (3b). Userdata installs Logstash at first boot; Phase 7 deploys the pipeline config and starts it.
 * **Inputs:** [batch Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md).
@@ -374,7 +370,7 @@ Expect: a bucket name, then a `sg-` ID.
 **If it fails**
 
 - 3b plan reports a missing `/pds/cds-infra/bastion-core/target-security-group-id` parameter: apply bastion-core for the venue, then re-run.
-- 3b plan reports a missing `/pds/private-hosted-zone/id` parameter: apply `pdc-cds-infra/private-hosted-zone` for the venue ([Phase 10](#phase-10---private-dns) step 1), then re-run.
+- 3b plan reports a missing `/pds/private-hosted-zone/id` parameter: apply `pdc-cds-infra/private-hosted-zone` for the venue ([README](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/private-hosted-zone/README.md)), then re-run.
 
 ### Phase 4 - Streaming
 
@@ -779,128 +775,6 @@ Expect: the domain name.
 | Streaming | Log config attached and distribution deployed (Phase 6); Firehose delivery errors. See [streaming troubleshooting](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#troubleshooting). |
 | Batch | Logstash service, pipeline stats, bad-log file. See [Monitoring](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/docs/operations.md#monitoring). |
 
-### Phase 10 - Private DNS
-
-* **Tier:** Power User.
-* **Needs:** Phase 1. Step 1 is also a prerequisite of Phase 3. Step 6 also needs Phases 3, 5, and 7.
-* **Time:** about 30 min, mostly the domain update.
-* **Creates:** the venue's private hosted zone, a custom endpoint on the domain, and a CNAME to it in the zone; switches the published endpoint to the custom hostname.
-* **Inputs:** [opensearch README: Private custom endpoint](opensearch/README.md#private-custom-endpoint), the [`private-hosted-zone` README](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/private-hosted-zone/README.md), and the [batch `logstash` README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md).
-
-The generated domain endpoint is published in AWS public DNS and cannot be hidden. The custom hostname lives in the private zone, so it resolves only inside the VPC.
-
-**Setup**
-
-```bash
-VENUE="dev"                                       # dev | test | prod
-REGION="us-west-2"
-PROFILE_NAME="<power-user-sso-profile>"
-PROFILE_PLATFORM_ENGINEER="<platform-engineer-sso-profile>"
-CDS_INFRA_DEPLOY_DIR="<path-to-cds-infra-deploy-checkout>"
-
-eval $(aws configure export-credentials --profile "${PROFILE_NAME}" --format env)
-unset AWS_PROFILE
-export AWS_DEFAULT_REGION="${REGION}"
-cd "${CDS_INFRA_DEPLOY_DIR}"
-```
-
-**Steps**
-
-1. Create the private hosted zone. On a new venue, do this before Phase 3, because batch `logstash` reads the zone from SSM. Skip it if it is already applied:
-
-   ```bash
-   task plan  VENUE="${VENUE}" COMPONENT=pdc-cds-infra/private-hosted-zone
-   task apply VENUE="${VENUE}" COMPONENT=pdc-cds-infra/private-hosted-zone
-   ```
-
-   Expect: one hosted zone and two SSM parameters added.
-
-2. Get an ACM certificate for the venue and wait until it is `ISSUED`. Each venue is its own account, so each needs its own. Request one wildcard certificate for the private zone, `*.<zone name>`: it covers the custom hostname and any later internal service hostname. A certificate for the parent public domain does not cover the hostname. Follow [Certificate](opensearch/README.md#certificate). The zone name is:
-
-   ```bash
-   aws ssm get-parameter --region "${REGION}" \
-     --name /pds/private-hosted-zone/name \
-     --query Parameter.Value --output text
-   ```
-
-3. Set the inputs in `venues/<venue>/o11y-platform/opensearch/terragrunt.hcl`. Leave `publish_custom_endpoint_to_ssm` false:
-
-   ```hcl
-   custom_endpoint_enabled         = true
-   custom_endpoint_certificate_arn = "<certificate-arn>"
-   ```
-
-4. Plan and apply:
-
-   ```bash
-   task plan  VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
-   ```
-
-   Expect: `aws_opensearch_domain.this` updated in place, one `aws_route53_record` added, and no replacement. A plan that replaces the domain destroys the indexed data: stop and do not apply.
-
-   ```bash
-   task apply VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
-   ```
-
-   The domain shows `Processing` until the update finishes; wait for it before step 5.
-
-5. Check the hostname. Run the first two commands from a host inside the VPC (for example the Logstash EC2 through the bastion) and the third from outside it. `CUSTOM_HOSTNAME` is `<custom_endpoint_label>.<zone name>`:
-
-   ```bash
-   CUSTOM_HOSTNAME="<custom-endpoint-hostname>"
-   nslookup "${CUSTOM_HOSTNAME}"
-   curl -sS -o /dev/null -w '%{http_code}\n' "https://${CUSTOM_HOSTNAME}/"
-   ```
-
-   Expect inside the VPC: the domain's private IP addresses, then an HTTP status (`403` without credentials) with no TLS error.
-
-   ```bash
-   nslookup "${CUSTOM_HOSTNAME}"
-   ```
-
-   Expect outside the VPC: `NXDOMAIN`.
-
-6. Switch the consumers to the custom hostname. Set `publish_custom_endpoint_to_ssm = true` in the same `terragrunt.hcl`, then plan and apply:
-
-   ```bash
-   task plan  VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
-   task apply VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
-   ```
-
-   Expect: only the `opensearch_endpoint` SSM parameter changes. Then re-run the Logstash deploy so it reads the new endpoint: [First-boot setup](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#first-boot-setup).
-
-7. Create the Logstash DNS record in the zone. A venue whose batch `logstash` was applied after the zone already has it; otherwise re-apply batch `logstash` (Platform Engineer):
-
-   ```bash
-   eval $(aws configure export-credentials --profile "${PROFILE_PLATFORM_ENGINEER}" --format env)
-   unset AWS_PROFILE
-
-   task plan  VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/logstash
-   task apply VENUE="${VENUE}" COMPONENT=o11y-cloudfront-batch/logstash
-   ```
-
-**Verify**
-
-```bash
-aws ssm get-parameter --region "${REGION}" \
-  --name /pds/o11y-platform/opensearch/opensearch_endpoint \
-  --query Parameter.Value --output text
-```
-
-Expect: the custom hostname. Then run the Logstash smoke test ([Phase 7 Verify](#phase-7---deploy-logstash-and-verify)) and check that documents still arrive ([Phase 9](#phase-9---end-to-end-verify)).
-
-**If it fails**
-
-- Step 4 plan fails reading `/pds/private-hosted-zone/id`: step 1 is not applied in this venue.
-- Step 4 apply fails on the certificate: it is not `ISSUED`, is in another region than the domain, is in another account, or does not cover the hostname. The applying role also needs `acm:ListCertificates` and `acm:DescribeCertificate`. If the wildcard certificate is rejected, request an exact-name certificate for the hostname instead.
-- Step 5 shows a TLS error: the certificate does not cover the hostname, or the client does not trust it.
-- To roll back, set `publish_custom_endpoint_to_ssm = false`, re-apply, and re-run the Logstash deploy. Turning `custom_endpoint_enabled` off as well removes the custom endpoint and the CNAME.
-
-**Notes**
-
-- Streaming looks up the domain by name and is not affected by the switch.
-- The AWS-generated endpoint keeps working. The security group rules and the access policy remain the access controls.
-
 ## Updating
 
 Re-run only the affected phase. Each component README owns the procedure for its own change.
@@ -911,7 +785,6 @@ Re-run only the affected phase. Each component README owns the procedure for its
 | Consumer role or security group recreated | Re-run [Phase 5](#phase-5---grant-consumers-opensearch-access): the SSM value changes, so the access policy and ingress rule must follow |
 | Operator roles with domain access | Edit `ops_role_arns` in the venue's `opensearch/terragrunt.hcl`, then re-run [Phase 5](#phase-5---grant-consumers-opensearch-access) |
 | UI application admin roles | Edit `admin_role_arns` in the venue's `opensearch-ui/terragrunt.hcl`, then re-run [Phase 8](#phase-8---opensearch-ui-application) step 4. Changes can take a few minutes to apply. A plan that would replace the application fails on `prevent_destroy`. |
-| Custom endpoint hostname label, certificate, or which endpoint consumers read | Edit `custom_endpoint_label`, `custom_endpoint_certificate_arn`, or `publish_custom_endpoint_to_ssm` in the venue's `opensearch/terragrunt.hcl`, then re-run [Phase 10](#phase-10---private-dns) steps 4 to 6 |
 | Batch IAM, S3, or Logstash instance | [batch Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md) |
 | Logstash pipeline config or `regexes.yaml` | [Update pipeline configuration](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/docs/operations.md#update-pipeline-configuration). Test first with the [pipeline tests](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md#running-the-integration-tests-with-docker). |
 | Streaming Lambda, Kinesis, Firehose, or IAM | [streaming Terraform README: Updating](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#updating) |
@@ -928,7 +801,6 @@ Run each test in its phase of the initial deployment, and again after any change
 | Streaming (`smoke-test-realtime-stream.sh`) | [Phase 6](#phase-6---cloudfront-pds-main), after the distribution is `Deployed`, and after changing the log config, Kinesis stream, or Firehose | [o11y-cloudfront-streaming: Verify](https://github.com/NASA-PDS/o11y-cloudfront-streaming/blob/main/terraform/README.md#verify) |
 | Logstash (`smoke-test.sh`, on the EC2) | [Phase 7](#phase-7---deploy-logstash-and-verify), and after each Logstash deploy | [o11y-cloudfront-batch: Smoke test](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#3-smoke-test) |
 | Cross-repo wiring | Verify steps in Phases 5 and 6, after changing a flag, role, or security group | This runbook |
-| Private DNS (resolves inside the VPC, NXDOMAIN outside) | [Phase 10](#phase-10---private-dns) step 5, and after any change to the zone, the custom endpoint, or the certificate | [Phase 10](#phase-10---private-dns) |
 | Logstash pipeline logic | Before deploying any pipeline change | [batch `tests/README.md`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md#running-the-integration-tests-with-docker) |
 | Data flow, both pipelines | After an initial deployment or any change to the path | [Phase 9](#phase-9---end-to-end-verify) |
 
@@ -947,7 +819,7 @@ task plan VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
 
 - Keep the `//<path>` in the value, run one leaf at a time (never `run --all`), and `unset TG_SOURCE` afterwards.
 - After editing local files, set `TG_SOURCE_UPDATE=true` for the run or delete the leaf's `.terragrunt-cache/`.
-- Pass module variables the leaf does not set yet as environment variables instead of editing the leaf, for example `export TF_VAR_custom_endpoint_enabled=true` and `export TF_VAR_custom_endpoint_certificate_arn="${CERT_ARN}"`.
+- Pass module variables the leaf does not set yet as environment variables instead of editing the leaf, for example `export TF_VAR_o11y_cloudfront_batch_enabled=true`.
 - Plan only. Apply from a merged ref, so what is deployed matches git.
 - `TG_SOURCE` replaces only the leaf's source. A module that calls another repo by git ref inside its own `.tf` files still fetches that ref; point it at a local checkout with a temporary, git-ignored `override.tf`. The modules in this repo have none. The batch `logstash` module's `ec2` module is pinned to a `pdc-tf-modules` tag.
 
@@ -1058,9 +930,7 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
    task destroy VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
    ```
 
-   This also removes the custom endpoint CNAME.
-
-8. Destroy the private hosted zone (Power User), only if no other component in the venue uses it. The zone is not force-destroyed, so the destroy fails while any record remains:
+8. Destroy the private hosted zone (Power User), only if no other component in the venue uses it. Do this after step 3 has destroyed the Logstash record. The zone is not force-destroyed, so the destroy fails while any record remains:
 
    ```bash
    task destroy VENUE="${VENUE}" COMPONENT=pdc-cds-infra/private-hosted-zone
@@ -1076,5 +946,5 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 - **State:** S3 backend, keys `o11y-platform/opensearch.tfstate` and `o11y-platform/opensearch-ui.tfstate`. Bucket, region, and lock come from Terragrunt in `cds-infra-deploy`.
 - **Venue inputs** (VPC, subnets, flags, role ARNs) are Terragrunt inputs in `cds-infra-deploy`. The `opensearch/tfvars/*.tfvars.example` files are a reference for plain Terraform, not the operational path.
-- **Private DNS:** the venue's private hosted zone is owned by `pdc-cds-infra` (the shared `route53/private-zone` module in `pdc-tf-modules`). This repo reads the zone ID and name from SSM, gives the domain a custom endpoint in the zone, and can publish that hostname as the endpoint consumers read (Phase 10).
+- **Private DNS:** the venue's private hosted zone is owned by `pdc-cds-infra` (the shared `route53/private-zone` module in `pdc-tf-modules`). Batch `logstash` reads its ID and name from SSM to create the Logstash EC2 record. The OpenSearch endpoint is the AWS-generated one; see the opensearch README, [Endpoint DNS](opensearch/README.md#endpoint-dns).
 - **Adding a consumer:** the consumer publishes its role ARN (and security group ID, if it needs VPC access) to SSM. This module gets a `<consumer>_enabled` variable (default `false`), a `data "aws_ssm_parameter"` block gated on it, an entry in `local.opensearch_access_principals`, and a gated `aws_vpc_security_group_ingress_rule`. Add the parameters to the [SSM contract](#ssm-contract) and a phase to this runbook.

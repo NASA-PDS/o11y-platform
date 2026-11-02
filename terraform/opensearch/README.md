@@ -26,7 +26,6 @@ No modules.
 | ---- | ---- |
 | [aws_opensearch_domain.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/opensearch_domain) | resource |
 | [aws_opensearch_domain_policy.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/opensearch_domain_policy) | resource |
-| [aws_route53_record.opensearch_custom_endpoint](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
 | [aws_security_group.opensearch](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_ssm_parameter.opensearch_arn](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_parameter) | resource |
 | [aws_ssm_parameter.opensearch_endpoint](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_parameter) | resource |
@@ -38,8 +37,6 @@ No modules.
 | [aws_ssm_parameter.firehose_role_arn](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
 | [aws_ssm_parameter.firehose_security_group_id](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
 | [aws_ssm_parameter.logstash_security_group_id](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
-| [aws_ssm_parameter.private_zone_id](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
-| [aws_ssm_parameter.private_zone_name](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
 
 ## Inputs
 
@@ -54,9 +51,6 @@ No modules.
 | <a name="input_aws_region"></a> [aws\_region](#input\_aws\_region) | Effective AWS Region | `string` | `"us-west-2"` | no |
 | <a name="input_cicd"></a> [cicd](#input\_cicd) | Tag value for CICD deployment method | `string` | `"iac"` | no |
 | <a name="input_component"></a> [component](#input\_component) | Tag value for component | `string` | `"o11y-platform"` | no |
-| <a name="input_custom_endpoint_certificate_arn"></a> [custom\_endpoint\_certificate\_arn](#input\_custom\_endpoint\_certificate\_arn) | ARN of the ACM certificate for the custom endpoint hostname, in the same region as the domain, status ISSUED. The certificate must cover <custom\_endpoint\_label>.<private hosted zone name>, either as an exact name or as a wildcard for the zone (*.<private hosted zone name>), and be trusted by the consumers. The principal applying this module needs acm:ListCertificates and acm:DescribeCertificate. Required when custom\_endpoint\_enabled = true. | `string` | `""` | no |
-| <a name="input_custom_endpoint_enabled"></a> [custom\_endpoint\_enabled](#input\_custom\_endpoint\_enabled) | Give the domain a custom endpoint that resolves only inside the VPC. When true, the private hosted zone ID and name are read from SSM (/pds/private-hosted-zone/id and /pds/private-hosted-zone/name, published by pdc-cds-infra private-hosted-zone), the domain's custom endpoint is set to <custom\_endpoint\_label>.<zone name> using custom\_endpoint\_certificate\_arn, and a CNAME to the AWS-generated endpoint is created in that zone. This is an in-place update of the domain. Enabling it before the private-hosted-zone stack has published its parameters fails the plan. | `bool` | `false` | no |
-| <a name="input_custom_endpoint_label"></a> [custom\_endpoint\_label](#input\_custom\_endpoint\_label) | Label prepended to the private hosted zone name to form the custom endpoint hostname. Used only when custom\_endpoint\_enabled = true. | `string` | `"o11y-opensearch"` | no |
 | <a name="input_data_node_count"></a> [data\_node\_count](#input\_data\_node\_count) | Number of data nodes | `number` | `3` | no |
 | <a name="input_data_node_instance_type"></a> [data\_node\_instance\_type](#input\_data\_node\_instance\_type) | Instance type for data nodes | `string` | `"r6g.xlarge.search"` | no |
 | <a name="input_dedicated_master_enabled"></a> [dedicated\_master\_enabled](#input\_dedicated\_master\_enabled) | Enable dedicated master nodes. Recommended for prod, unnecessary for dev single-node clusters. | `bool` | `true` | no |
@@ -70,7 +64,6 @@ No modules.
 | <a name="input_o11y_cloudfront_streaming_enabled"></a> [o11y\_cloudfront\_streaming\_enabled](#input\_o11y\_cloudfront\_streaming\_enabled) | Whether the o11y-cloudfront-streaming consumer has been deployed. When true, its Firehose role ARN is read from SSM (/pds/o11y-cloudfront-streaming/firehose/firehose-role-arn) and added as an OpenSearch access-policy principal, and its Firehose SG ID is read from SSM (/pds/o11y-cloudfront-streaming/firehose/firehose-security-group-id) to create the Firehose→OpenSearch VPC ingress rule. Leave false for the initial bootstrap deploy (before o11y-cloudfront-streaming has published those SSM parameters), then re-apply with true once it exists — this only updates the access policy and ingress rule, no domain redeployment. | `bool` | `false` | no |
 | <a name="input_ops_role_arns"></a> [ops\_role\_arns](#input\_ops\_role\_arns) | IAM role ARNs of operators granted es:ESHttp* on the domain, in addition to the enabled consumer roles. Used for ops access through the OpenSearch UI Application. Must be IAM role ARNs (arn:<partition>:iam::<account-id>:role/<name>), which match every session of the role; assumed-role/STS ARNs do not match. Leave empty when operators already have es:ESHttp* through their own IAM policy. | `list(string)` | `[]` | no |
 | <a name="input_partition"></a> [partition](#input\_partition) | AWS partition (aws, aws-us-gov, aws-cn) | `string` | `"aws"` | no |
-| <a name="input_publish_custom_endpoint_to_ssm"></a> [publish\_custom\_endpoint\_to\_ssm](#input\_publish\_custom\_endpoint\_to\_ssm) | Publish the custom endpoint hostname, instead of the AWS-generated endpoint, to /pds/o11y-platform/opensearch/opensearch\_endpoint so consumers pick it up. Apply with custom\_endpoint\_enabled = true and this false first, confirm the hostname resolves and serves TLS inside the VPC, then set this true. Setting it back to false restores the generated endpoint. Requires custom\_endpoint\_enabled = true. | `bool` | `false` | no |
 | <a name="input_tenant"></a> [tenant](#input\_tenant) | Tag value for tenant | `string` | `"en"` | no |
 | <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | VPC ID for the OpenSearch domain security group. Required when vpc\_enabled = true. | `string` | `""` | no |
 | <a name="input_vpc_subnet_ids"></a> [vpc\_subnet\_ids](#input\_vpc\_subnet\_ids) | Subnet IDs for the OpenSearch domain VPC endpoint. One subnet per AZ. Required when vpc\_enabled = true. | `list(string)` | `[]` | no |
@@ -81,9 +74,8 @@ No modules.
 | Name | Description |
 | ---- | ----------- |
 | <a name="output_opensearch_arn"></a> [opensearch\_arn](#output\_opensearch\_arn) | Managed OpenSearch domain ARN — published to /pds/o11y-platform/opensearch/opensearch\_arn |
-| <a name="output_opensearch_custom_endpoint"></a> [opensearch\_custom\_endpoint](#output\_opensearch\_custom\_endpoint) | Custom endpoint hostname in the private hosted zone. Null when custom\_endpoint\_enabled = false |
 | <a name="output_opensearch_domain_name"></a> [opensearch\_domain\_name](#output\_opensearch\_domain\_name) | Managed OpenSearch domain name (Terraform output only, not published to SSM) |
-| <a name="output_opensearch_endpoint"></a> [opensearch\_endpoint](#output\_opensearch\_endpoint) | Managed OpenSearch domain endpoint used by clients (custom hostname when published, otherwise the AWS-generated endpoint) — published to /pds/o11y-platform/opensearch/opensearch\_endpoint |
+| <a name="output_opensearch_endpoint"></a> [opensearch\_endpoint](#output\_opensearch\_endpoint) | Managed OpenSearch domain endpoint URL — published to /pds/o11y-platform/opensearch/opensearch\_endpoint |
 | <a name="output_opensearch_security_group_id"></a> [opensearch\_security\_group\_id](#output\_opensearch\_security\_group\_id) | OpenSearch domain VPC security group ID — published to /pds/o11y-platform/opensearch/opensearch\_security\_group\_id when vpc\_enabled |
 <!-- END_TF_DOCS -->
 
@@ -125,12 +117,6 @@ inputs = {
   # Operator IAM role ARNs granted es:ESHttp* on the domain (data access in the OpenSearch UI).
   ops_role_arns = []
 
-  # Private custom endpoint; see "Private custom endpoint" below. Leave both false until the
-  # private hosted zone exists and you have an ACM certificate for the hostname.
-  custom_endpoint_enabled         = false
-  custom_endpoint_certificate_arn = ""
-  publish_custom_endpoint_to_ssm  = false
-
   engine_version = "OpenSearch_2.19"
 }
 ```
@@ -159,63 +145,23 @@ task opensearch:deploy VENUE=dev
 
 - **Smoke test** (`scripts/smoke-test.sh`): [Phase 1 Verify](../README.md#phase-1---bootstrap-opensearch).
 - **OpenSearch UI access** (one-time VPC authorization of `application.opensearchservice.amazonaws.com`): [Phase 8, step 2](../README.md#phase-8---opensearch-ui-application).
-- **Testing an unmerged change** to this module through Terragrunt, without editing `ref=` or `module_ref`: [runbook](../README.md#testing-an-unmerged-change).
+- **Plan an unmerged module change** without editing `ref=` or `module_ref`: [Testing an unmerged change](../README.md#testing-an-unmerged-change).
 
-## Private custom endpoint
+## Endpoint DNS
 
-AWS publishes the generated domain endpoint (`vpc-<domain>-<id>.<region>.es.amazonaws.com`) in its public DNS zone, and this cannot be turned off, so anyone can look up the domain's private IP addresses. A custom endpoint gives the domain a hostname in the venue's Route 53 private hosted zone. That name resolves only inside the VPC; from outside it returns NXDOMAIN.
+The domain's AWS-generated endpoint (`vpc-<domain>-<id>.<region>.es.amazonaws.com`) is published in AWS public DNS and resolves to the domain's private IP addresses. It cannot be removed:
 
-When `custom_endpoint_enabled = true` the module:
+- AWS documents that the service assigns a public DNS hostname to a VPC domain's endpoint and that clients must use a public DNS service to resolve it ([VPC domains, Architecture](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/vpc.html)).
+- The [`DomainEndpointOptions` API](https://docs.aws.amazon.com/opensearch-service/latest/APIReference/API_DomainEndpointOptions.html) has no option to hide or disable the generated endpoint.
+- A Route 53 private hosted zone only changes answers inside the associated VPC. The public record is in an AWS-owned zone.
 
-- reads the zone ID and name from SSM (`/pds/private-hosted-zone/id` and `/pds/private-hosted-zone/name`, published by the `pdc-cds-infra` `private-hosted-zone` stack);
-- sets the domain's custom endpoint to `<custom_endpoint_label>.<zone name>` with the ACM certificate in `custom_endpoint_certificate_arn`;
-- creates a CNAME from that hostname to the generated endpoint in the private zone.
+The public name discloses the domain's private addresses; it does not make the domain reachable. Access is limited to:
 
-This is an in-place update of the domain with no replacement and no data loss; the plan must not replace `aws_opensearch_domain.this`. The generated name stays in public DNS and keeps working, so the security group rules and the domain access policy remain the access controls.
+- the VPC: the domain has no public endpoint;
+- the security group, which allows HTTPS only from the Logstash and Firehose security groups;
+- the domain access policy, which allows only the named IAM roles and requires signed requests.
 
-`publish_custom_endpoint_to_ssm` controls what consumers read. While it is `false`, `/pds/o11y-platform/opensearch/opensearch_endpoint` holds the generated endpoint; when `true`, it holds the custom hostname. Setting it back to `false` restores the generated endpoint.
-
-### Certificate
-
-The certificate must cover the exact custom hostname, `<custom_endpoint_label>.<zone name>`. Per the AWS documentation for [OpenSearch Service custom endpoints](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/customendpoint.html), the certificate must have the custom endpoint name, be in the same account as the domain, and have status `ISSUED`; the same page lists a wildcard certificate as an option. Consumers connect to the hostname over TLS, so they must trust the certificate; a public ACM certificate is trusted by default. The principal that applies this module needs `acm:ListCertificates` and `acm:DescribeCertificate`.
-
-**What covers the hostname**
-
-- A certificate for the parent public domain does not. A certificate name matches only itself, and a wildcard `*.<parent>` matches exactly one label, so it does not cover `<label>.internal.<parent>`.
-- An exact-name certificate for `<custom_endpoint_label>.<zone name>` does.
-- **Recommended:** one wildcard certificate for the private zone, `*.<zone name>`. It covers the OpenSearch hostname and any internal service hostname added to the zone later.
-
-Prefer the wildcard because public ACM certificates are written to public Certificate Transparency logs. An exact-name certificate publishes the individual internal hostname; the wildcard publishes only the zone name. Using the wildcard with an OpenSearch custom endpoint has not yet been exercised on a PDS domain: if the apply rejects the certificate, use an exact-name certificate.
-
-**Where to create it**
-
-- Create the certificate in the domain's region (`us-west-2`). The CloudFront certificate in `us-east-1` is not suitable.
-- Each venue is its own AWS account, so each venue needs its own certificate.
-- ACM validates a public certificate from public DNS, so the private zone cannot be used for validation. Create the DNS validation record in the venue's public hosted zone, under the full validation name ACM returns.
-- ACM Private CA is the alternative to a public certificate. It is a paid service, and every consumer must trust the private CA.
-
-```bash
-REGION="us-west-2"
-ZONE_NAME="<private-hosted-zone-name>"
-
-aws acm request-certificate --region "${REGION}" \
-  --domain-name "*.${ZONE_NAME}" --validation-method DNS \
-  --query CertificateArn --output text
-```
-
-Then read the validation record from the certificate and create it in the public zone:
-
-```bash
-CERT_ARN="<certificate-arn-from-above>"
-aws acm describe-certificate --region "${REGION}" --certificate-arn "${CERT_ARN}" \
-  --query 'Certificate.DomainValidationOptions[0].ResourceRecord' --output json
-```
-
-Wait until the certificate is `ISSUED`, then set `custom_endpoint_certificate_arn`. For an exact-name certificate, request `<custom_endpoint_label>.<zone name>` as the `--domain-name` instead.
-
-### Enable and verify
-
-The steps and permissions are in the runbook: [Phase 10](../README.md#phase-10---private-dns).
+Consumers read the generated endpoint from SSM (`/pds/o11y-platform/opensearch/opensearch_endpoint`). Keep the generated name out of repositories, tickets, and logs.
 
 ## Upgrade
 
