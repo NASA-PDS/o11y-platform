@@ -113,8 +113,8 @@ Parameters that cross a repo boundary, read at plan time. Parameters used inside
 | `/pds/o11y-cloudfront-streaming/kinesis/kinesis-stream-arn` | streaming `iam/` (2b); the ARN is computed, the stream is created in phase 4 | `pds-main` | `enable_o11y_streaming` |
 | `/pds/pdc-cds-infra/s3/pds-logs-bucket-arn` | `pds-main` (6); seeded by hand before phase 2b on a first deploy | streaming `iam/` and `streaming/` | always |
 | `/pds/cds-infra/bastion-core/target-security-group-id` | `pdc-cds-infra` bastion-core (before 3) | batch `logstash` | `manage_ec2_instance = true` |
-| `/pds/private-hosted-zone/id` | `pdc-cds-infra` private-hosted-zone (10) | platform `opensearch`; batch `logstash` | `custom_endpoint_enabled`; `manage_ec2_instance = true` |
-| `/pds/private-hosted-zone/name` | `pdc-cds-infra` private-hosted-zone (10) | platform `opensearch`; batch `logstash` | `custom_endpoint_enabled`; `manage_ec2_instance = true` |
+| `/pds/private-hosted-zone/id` | `pdc-cds-infra` private-hosted-zone (before 3) | platform `opensearch`; batch `logstash` | `custom_endpoint_enabled`; `manage_ec2_instance = true` |
+| `/pds/private-hosted-zone/name` | `pdc-cds-infra` private-hosted-zone (before 3) | platform `opensearch`; batch `logstash` | `custom_endpoint_enabled`; `manage_ec2_instance = true` |
 
 Streaming looks up the OpenSearch domain by name, not through SSM.
 
@@ -145,10 +145,13 @@ flowchart TD
     P9["9. End-to-end verify"]
     P10["10. Private DNS\n(Power User)"]
     PB["pdc-cds-infra bastion-core\n(before 3)"]
+    PZ["pdc-cds-infra private-hosted-zone\n(before 3, Phase 10 step 1)"]
 
     P1 --> P2a & P2b
     P2a --> P3
     PB --> P3
+    PZ --> P3
+    PZ --> P10
     P2b --> P4
     P3 --> P5
     P4 --> P5
@@ -315,7 +318,7 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 ### Phase 3 - Batch S3 and Logstash EC2
 
 * **Tier:** 3a Power User, 3b Platform Engineer.
-* **Needs:** Phases 1 and 2a, and the venue's [bastion-core](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/bastion-core/README.md#deployment) stack (`pdc-cds-infra/bastion-core/iam`, then `pdc-cds-infra/bastion-core`). 3b reads the bastion target security group from SSM.
+* **Needs:** Phases 1 and 2a, the venue's [bastion-core](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/bastion-core/README.md#deployment) stack (`pdc-cds-infra/bastion-core/iam`, then `pdc-cds-infra/bastion-core`), and the venue's private hosted zone ([Phase 10](#phase-10---private-dns) step 1, `pdc-cds-infra/private-hosted-zone`). 3b reads the bastion target security group and the private zone from SSM.
 * **Time:** about 10 min. The instance then bootstraps Logstash in the background for 5-10 min.
 * **Creates:** the log bucket (3a) and the Logstash EC2 and its security group (3b). Userdata installs Logstash at first boot; Phase 7 deploys the pipeline config and starts it.
 * **Inputs:** [batch Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md).
@@ -371,6 +374,7 @@ Expect: a bucket name, then a `sg-` ID.
 **If it fails**
 
 - 3b plan reports a missing `/pds/cds-infra/bastion-core/target-security-group-id` parameter: apply bastion-core for the venue, then re-run.
+- 3b plan reports a missing `/pds/private-hosted-zone/id` parameter: apply `pdc-cds-infra/private-hosted-zone` for the venue ([Phase 10](#phase-10---private-dns) step 1), then re-run.
 
 ### Phase 4 - Streaming
 
@@ -778,7 +782,7 @@ Expect: the domain name.
 ### Phase 10 - Private DNS
 
 * **Tier:** Power User.
-* **Needs:** Phase 1. Step 6 also needs Phases 3, 5, and 7.
+* **Needs:** Phase 1. Step 1 is also a prerequisite of Phase 3. Step 6 also needs Phases 3, 5, and 7.
 * **Time:** about 30 min, mostly the domain update.
 * **Creates:** the venue's private hosted zone, a custom endpoint on the domain, and a CNAME to it in the zone; switches the published endpoint to the custom hostname.
 * **Inputs:** [opensearch README: Private custom endpoint](opensearch/README.md#private-custom-endpoint), the [`private-hosted-zone` README](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/private-hosted-zone/README.md), and the [batch `logstash` README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md).
@@ -802,7 +806,7 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 **Steps**
 
-1. Create the private hosted zone:
+1. Create the private hosted zone. On a new venue, do this before Phase 3, because batch `logstash` reads the zone from SSM. Skip it if it is already applied:
 
    ```bash
    task plan  VENUE="${VENUE}" COMPONENT=pdc-cds-infra/private-hosted-zone
@@ -865,7 +869,7 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
    Expect: only the `opensearch_endpoint` SSM parameter changes. Then re-run the Logstash deploy so it reads the new endpoint: [First-boot setup](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/logstash/README.md#first-boot-setup).
 
-7. Create the Logstash DNS record in the zone by re-applying batch `logstash` (Platform Engineer):
+7. Create the Logstash DNS record in the zone. A venue whose batch `logstash` was applied after the zone already has it; otherwise re-apply batch `logstash` (Platform Engineer):
 
    ```bash
    eval $(aws configure export-credentials --profile "${PROFILE_PLATFORM_ENGINEER}" --format env)
