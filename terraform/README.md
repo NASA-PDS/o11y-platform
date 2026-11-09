@@ -113,6 +113,8 @@ Parameters that cross a repo boundary, read at plan time. Parameters used inside
 | `/pds/o11y-cloudfront-streaming/kinesis/kinesis-stream-arn` | streaming `iam/` (2b); the ARN is computed, the stream is created in phase 4 | `pds-main` | `enable_o11y_streaming` |
 | `/pds/pdc-cds-infra/s3/pds-logs-bucket-arn` | `pds-main` (6); seeded by hand before phase 2b on a first deploy | streaming `iam/` and `streaming/` | always |
 | `/pds/cds-infra/bastion-core/target-security-group-id` | `pdc-cds-infra` bastion-core (before 3) | batch `logstash` | `manage_ec2_instance = true` |
+| `/pds/private-hosted-zone/id` | `pdc-cds-infra` private-hosted-zone (before 3) | batch `logstash` | `manage_ec2_instance = true` |
+| `/pds/private-hosted-zone/name` | `pdc-cds-infra` private-hosted-zone (before 3) | batch `logstash` | `manage_ec2_instance = true` |
 
 Streaming looks up the OpenSearch domain by name, not through SSM.
 
@@ -142,10 +144,12 @@ flowchart TD
     P8["8. OpenSearch UI Application\n(Power User)"]
     P9["9. End-to-end verify"]
     PB["pdc-cds-infra bastion-core\n(before 3)"]
+    PZ["pdc-cds-infra private-hosted-zone\n(before 3)"]
 
     P1 --> P2a & P2b
     P2a --> P3
     PB --> P3
+    PZ --> P3
     P2b --> P4
     P3 --> P5
     P4 --> P5
@@ -310,7 +314,7 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 ### Phase 3 - Batch S3 and Logstash EC2
 
 * **Tier:** 3a Power User, 3b Platform Engineer.
-* **Needs:** Phases 1 and 2a, and the venue's [bastion-core](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/bastion-core/README.md#deployment) stack (`pdc-cds-infra/bastion-core/iam`, then `pdc-cds-infra/bastion-core`). 3b reads the bastion target security group from SSM.
+* **Needs:** Phases 1 and 2a, the venue's [bastion-core](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/bastion-core/README.md#deployment) stack (`pdc-cds-infra/bastion-core/iam`, then `pdc-cds-infra/bastion-core`), and the venue's private hosted zone (`pdc-cds-infra/private-hosted-zone`, Power User: `task apply VENUE="${VENUE}" COMPONENT=pdc-cds-infra/private-hosted-zone`; see its [README](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/private-hosted-zone/README.md)). 3b reads the bastion target security group and the private zone from SSM.
 * **Time:** about 10 min. The instance then bootstraps Logstash in the background for 5-10 min.
 * **Creates:** the log bucket (3a) and the Logstash EC2 and its security group (3b). Userdata installs Logstash at first boot; Phase 7 deploys the pipeline config and starts it.
 * **Inputs:** [batch Terraform README](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/terraform/README.md).
@@ -366,6 +370,7 @@ Expect: a bucket name, then a `sg-` ID.
 **If it fails**
 
 - 3b plan reports a missing `/pds/cds-infra/bastion-core/target-security-group-id` parameter: apply bastion-core for the venue, then re-run.
+- 3b plan reports a missing `/pds/private-hosted-zone/id` parameter: apply `pdc-cds-infra/private-hosted-zone` for the venue ([README](https://github.com/NASA-PDS/pdc-cds-infra/blob/main/terraform/private-hosted-zone/README.md)), then re-run.
 
 ### Phase 4 - Streaming
 
@@ -799,6 +804,25 @@ Run each test in its phase of the initial deployment, and again after any change
 | Logstash pipeline logic | Before deploying any pipeline change | [batch `tests/README.md`](https://github.com/NASA-PDS/o11y-cloudfront-batch/blob/main/tests/README.md#running-the-integration-tests-with-docker) |
 | Data flow, both pipelines | After an initial deployment or any change to the path | [Phase 9](#phase-9---end-to-end-verify) |
 
+### Testing an unmerged change
+
+To plan a component against a local checkout of its module repo, without editing the `ref=` or the venue's `module_ref`, override the Terragrunt source for the run. This applies to every venue (dev, test, prod). The full procedure is in the cds-infra-deploy README, section "Test unmerged module changes locally"; the essentials:
+
+```bash
+MODULE_DIR="<path-to-module-repo-checkout>"
+SOURCE_PATH="terraform/opensearch"     # the //<path> in the leaf's terraform.source
+export TG_SOURCE="${MODULE_DIR}//${SOURCE_PATH}"
+
+cd "${CDS_INFRA_DEPLOY_DIR}"
+task plan VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
+```
+
+- Keep the `//<path>` in the value, run one leaf at a time (never `run --all`), and `unset TG_SOURCE` afterwards.
+- After editing local files, set `TG_SOURCE_UPDATE=true` for the run or delete the leaf's `.terragrunt-cache/`.
+- Pass module variables the leaf does not set yet as environment variables instead of editing the leaf, for example `export TF_VAR_o11y_cloudfront_batch_enabled=true`.
+- Plan only. Apply from a merged ref, so what is deployed matches git.
+- `TG_SOURCE` replaces only the leaf's source. A module that calls another repo by git ref inside its own `.tf` files still fetches that ref; point it at a local checkout with a temporary, git-ignored `override.tf`. The modules in this repo have none. The batch `logstash` module's `ec2` module is pinned to a `pdc-tf-modules` tag.
+
 ## Teardown
 
 Irreversible: this deletes all indexed data and the UI workspaces. Destroy in reverse phase order, using the tier that created each resource.
@@ -906,6 +930,12 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
    task destroy VENUE="${VENUE}" COMPONENT=o11y-platform/opensearch
    ```
 
+8. Destroy the private hosted zone (Power User), only if no other component in the venue uses it. Do this after step 3 has destroyed the Logstash record. The zone is not force-destroyed, so the destroy fails while any record remains:
+
+   ```bash
+   task destroy VENUE="${VENUE}" COMPONENT=pdc-cds-infra/private-hosted-zone
+   ```
+
 **Notes**
 
 - Roles must outlive the resources that use them, so IAM is destroyed after the resources.
@@ -916,4 +946,5 @@ cd "${CDS_INFRA_DEPLOY_DIR}"
 
 - **State:** S3 backend, keys `o11y-platform/opensearch.tfstate` and `o11y-platform/opensearch-ui.tfstate`. Bucket, region, and lock come from Terragrunt in `cds-infra-deploy`.
 - **Venue inputs** (VPC, subnets, flags, role ARNs) are Terragrunt inputs in `cds-infra-deploy`. The `opensearch/tfvars/*.tfvars.example` files are a reference for plain Terraform, not the operational path.
+- **Private DNS:** the venue's private hosted zone is owned by `pdc-cds-infra` (the shared `route53/private-zone` module in `pdc-tf-modules`). Batch `logstash` reads its ID and name from SSM to create the Logstash EC2 record. The OpenSearch endpoint is the AWS-generated one; see the opensearch README, [Endpoint DNS](opensearch/README.md#endpoint-dns).
 - **Adding a consumer:** the consumer publishes its role ARN (and security group ID, if it needs VPC access) to SSM. This module gets a `<consumer>_enabled` variable (default `false`), a `data "aws_ssm_parameter"` block gated on it, an entry in `local.opensearch_access_principals`, and a gated `aws_vpc_security_group_ingress_rule`. Add the parameters to the [SSM contract](#ssm-contract) and a phase to this runbook.

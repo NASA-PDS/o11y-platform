@@ -145,6 +145,23 @@ task opensearch:deploy VENUE=dev
 
 - **Smoke test** (`scripts/smoke-test.sh`): [Phase 1 Verify](../README.md#phase-1---bootstrap-opensearch).
 - **OpenSearch UI access** (one-time VPC authorization of `application.opensearchservice.amazonaws.com`): [Phase 8, step 2](../README.md#phase-8---opensearch-ui-application).
+- **Plan an unmerged module change** without editing `ref=` or `module_ref`: [Testing an unmerged change](../README.md#testing-an-unmerged-change).
+
+## Endpoint DNS
+
+The domain's AWS-generated endpoint (`vpc-<domain>-<id>.<region>.es.amazonaws.com`) is published in AWS public DNS and resolves to the domain's private IP addresses. It cannot be removed:
+
+- AWS documents that the service assigns a public DNS hostname to a VPC domain's endpoint and that clients must use a public DNS service to resolve it ([VPC domains, Architecture](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/vpc.html)).
+- The [`DomainEndpointOptions` API](https://docs.aws.amazon.com/opensearch-service/latest/APIReference/API_DomainEndpointOptions.html) has no option to hide or disable the generated endpoint.
+- A Route 53 private hosted zone only changes answers inside the associated VPC. The public record is in an AWS-owned zone.
+
+The public name discloses the domain's private addresses; it does not make the domain reachable. Access is limited to:
+
+- the VPC: the domain has no public endpoint;
+- the security group, which allows HTTPS only from the Logstash and Firehose security groups;
+- the domain access policy, which allows only the named IAM roles and requires signed requests.
+
+Consumers read the generated endpoint from SSM (`/pds/o11y-platform/opensearch/opensearch_endpoint`). Keep the generated name out of repositories, tickets, and logs.
 
 ## Upgrade
 
